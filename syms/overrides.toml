@@ -1,0 +1,76 @@
+# Manual decisions for the function finder (tools/kig_funcs.py), the symbols file (tools/gen_syms.py)
+# and the recompiler config (tools/gen_config.py).
+#
+# [[entry]]      section/vram: force a function start
+# [[not_entry]]  section/vram: drop a start the finder took from a pointer
+# [[rename]]     section/vram/name/reason
+# [[ignore]]     name/reason: not recompiled (N64Recomp [patches] ignored)
+
+[[rename]]
+section = "seg0"
+vram = 0x800412C0
+name = "kig_osContDataCrc"
+reason = "libultra's __osContDataCrc; the game's EEPROM save code (seg1 801CD08C/801CD1C4) uses it as a checksum. N64Recomp skips the libultra name and the runtime has no implementation; the function is pure, so it is recompiled under this name"
+
+[[rename]]
+section = "boot"
+vram = 0x80003BB0
+name = "kig_osDpSetNextBuffer"
+reason = "libultra's osDpSetNextBuffer. The runtime's version is unimplemented (assert); KI Gold's scheduler sends CPU-built RDP lists with it every frame. Kept under this name so a hook at its entry can call src/game/kig_hooks.cpp's replacement"
+
+[[ignore]]
+name = "func_800042C8"
+reason = "TLB-miss path of libultra's __osException (mfc0 BadVaddr, j __osDispatchThread); the runtime replaces exceptions"
+
+[[ignore]]
+name = "func_800044E8"
+reason = "register restore + eret tail of __osDispatchThread; the runtime does thread switching"
+
+# Computed jumps in seg0's handwritten fill code (Duff's-device style, no table):
+#   800322DC: jr 0x800322E4 + (7 - n) * 8;  80032424: jr 0x8003242C + (7 - n) * 4  (n = 0..7)
+[[entry]]
+section = "seg0"
+vram = 0x800322EC
+[[entry]]
+section = "seg0"
+vram = 0x800322F4
+[[entry]]
+section = "seg0"
+vram = 0x800322FC
+[[entry]]
+section = "seg0"
+vram = 0x80032304
+[[entry]]
+section = "seg0"
+vram = 0x8003230C
+[[entry]]
+section = "seg0"
+vram = 0x80032314
+[[entry]]
+section = "seg0"
+vram = 0x8003231C
+[[entry]]
+section = "seg0"
+vram = 0x8003242C
+[[entry]]
+section = "seg0"
+vram = 0x80032430
+[[entry]]
+section = "seg0"
+vram = 0x80032434
+[[entry]]
+section = "seg0"
+vram = 0x80032438
+[[entry]]
+section = "seg0"
+vram = 0x8003243C
+[[entry]]
+section = "seg0"
+vram = 0x80032440
+[[entry]]
+section = "seg0"
+vram = 0x80032444
+[[entry]]
+section = "seg0"
+vram = 0x80032448
+

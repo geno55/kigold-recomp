@@ -1,0 +1,71 @@
+diff --git a/ultramodern/include/ultramodern/renderer_context.hpp b/ultramodern/include/ultramodern/renderer_context.hpp
+index d60c4ec..8fc9b5a 100644
+--- a/ultramodern/include/ultramodern/renderer_context.hpp
++++ b/ultramodern/include/ultramodern/renderer_context.hpp
+@@ -84,6 +84,8 @@ namespace ultramodern {
+ 
+                 virtual void enable_instant_present() = 0;
+                 virtual void send_dl(const OSTask* task) = 0;
++                // kig (patch 0006): a raw RDP command list [start, end), physical addresses.
++                virtual void send_rdp_list(uint32_t start, uint32_t end) { (void)start; (void)end; }
+                 virtual void send_dummy_workload(uint32_t fb_address) = 0;
+                 virtual void update_screen() = 0;
+                 virtual void shutdown() = 0;
+diff --git a/ultramodern/include/ultramodern/ultramodern.hpp b/ultramodern/include/ultramodern/ultramodern.hpp
+index 1bb7de8..81df5af 100644
+--- a/ultramodern/include/ultramodern/ultramodern.hpp
++++ b/ultramodern/include/ultramodern/ultramodern.hpp
+@@ -100,6 +100,8 @@ void set_entrypoint_thread();
+ bool is_entrypoint_thread();
+ bool is_game_thread();
+ void submit_rsp_task(RDRAM_ARG PTR(OSTask) task);
++// kig (patch 0006): a raw RDP command list (osDpSetNextBuffer), run on the gfx thread, then DP interrupt.
++void submit_rdp_list(uint32_t start, uint32_t end);
+ void send_si_message();
+ // kig (patch 0003): the idle thread's wait; is_game_idle() is true while it waits with nothing queued.
+ void wait_for_external_message_idle(RDRAM_ARG1);
+diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index 475f404..c47c1cd 100644
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -53,7 +53,13 @@ struct DummyWorkloadAction {
+     int32_t fb_address;
+ };
+ 
+-using Action = std::variant<SpTaskAction, ScreenUpdateAction, UpdateConfigAction, DummyWorkloadAction>;
++// kig (patch 0006): a raw RDP command list started by osDpSetNextBuffer (the game builds them on the CPU).
++struct RdpListAction {
++    uint32_t start;
++    uint32_t end;
++};
++
++using Action = std::variant<SpTaskAction, ScreenUpdateAction, UpdateConfigAction, DummyWorkloadAction, RdpListAction>;
+ 
+ struct ViState {
+     const OSViMode* mode;
+@@ -463,6 +469,11 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+             else if (const auto* dummy_workload_action = std::get_if<DummyWorkloadAction>(&action)) {
+                 renderer_context->send_dummy_workload(dummy_workload_action->fb_address);
+             }
++            else if (const auto* rdp_list_action = std::get_if<RdpListAction>(&action)) {
++                renderer_context->send_rdp_list(rdp_list_action->start, rdp_list_action->end);
++                dp_complete();
++                gfx_tasks_pending--;
++            }
+         }
+     }
+ 
+@@ -640,6 +651,13 @@ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
+     }
+ }
+ 
++// kig (patch 0006): run a raw RDP command list [start, end) (physical addresses) on the gfx thread, in
++// order with the gfx tasks, then raise the DP interrupt.
++void ultramodern::submit_rdp_list(uint32_t start, uint32_t end) {
++    gfx_tasks_pending++;
++    events_context.action_queue.enqueue(RdpListAction{ start, end });
++}
++
+ void ultramodern::send_si_message() {
+     ultramodern::enqueue_external_message_src(events_context.si.mq, events_context.si.msg, false, ultramodern::EventMessageSource::Si);
+ }

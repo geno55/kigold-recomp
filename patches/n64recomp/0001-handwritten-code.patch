@@ -1,0 +1,174 @@
+diff --git a/src/analysis.cpp b/src/analysis.cpp
+index 9eaaa30..c17a4e4 100644
+--- a/src/analysis.cpp
++++ b/src/analysis.cpp
+@@ -146,13 +146,10 @@ bool analyze_instruction(const rabbitizer::InstructionCpu& instr, const N64Recom
+     case InstrId::cpu_sw:
+         // If this is a store to the stack, copy the state of rt into the stack at the given offset
+         if (base == (int)RegId::GPR_O32_sp) {
+-            if ((imm & 0b11) != 0) {
+-                fmt::print(stderr, "Invalid alignment on offset for sw to stack: {}\n", (int16_t)imm);
+-                return false;
+-            }
+-            if (((int16_t)imm) < 0) {
+-                fmt::print(stderr, "Negative offset for sw to stack: {}\n", (int16_t)imm);
+-                return false;
++            // Handwritten code may use $sp as a general pointer (negative or unaligned offsets):
++            // nothing to track for jump table detection there.
++            if ((imm & 0b11) != 0 || ((int16_t)imm) < 0) {
++                break;
+             }
+             size_t stack_offset = imm / 4;
+             if (stack_offset >= stack_states.size()) {
+@@ -166,13 +163,10 @@ bool analyze_instruction(const rabbitizer::InstructionCpu& instr, const N64Recom
+         temp.invalidate();
+         // If this is a load from the stack, copy the state of the stack at the given offset to rt
+         if (base == (int)RegId::GPR_O32_sp) {
+-            if ((imm & 0b11) != 0) {
+-                fmt::print(stderr, "Invalid alignment on offset for lw from stack: {}\n", (int16_t)imm);
+-                return false;
+-            }
+-            if (((int16_t)imm) < 0) {
+-                fmt::print(stderr, "Negative offset for lw from stack: {}\n", (int16_t)imm);
+-                return false;
++            // See sw above.
++            if ((imm & 0b11) != 0 || ((int16_t)imm) < 0) {
++                reg_states[rt] = temp;
++                break;
+             }
+             size_t stack_offset = imm / 4;
+             if (stack_offset >= stack_states.size()) {
+@@ -340,8 +334,12 @@ bool N64Recomp::analyze_function(const N64Recomp::Context& context, const N64Rec
+         }
+ 
+         if (cur_jtbl.entries.size() == 0) {
+-            fmt::print("Failed to determine size of jump table at 0x{:08X} for instruction at 0x{:08X}\n", cur_jtbl.vram, cur_jtbl.jr_vram);
+-            return false;
++            // Handwritten code: a table of addresses outside this function (other functions'
++            // entry points). Not a switch; the jr stays an indirect tail call.
++            fmt::print("[Info] Jump table at 0x{:08X} for instruction at 0x{:08X} leaves the function; using an indirect tail call\n", cur_jtbl.vram, cur_jtbl.jr_vram);
++            stats.jump_tables.erase(stats.jump_tables.begin() + i);
++            i--;
++            continue;
+         }
+ 
+         //fmt::print("Jtbl at 0x{:08X} (rom 0x{:08X}) with {} entries used by instr at 0x{:08X}\n", cur_jtbl.vram, cur_jtbl.rom, cur_jtbl.entries.size(), cur_jtbl.jr_vram);
+diff --git a/src/cgenerator.cpp b/src/cgenerator.cpp
+index 94f85c5..b1cae22 100644
+--- a/src/cgenerator.cpp
++++ b/src/cgenerator.cpp
+@@ -525,13 +525,15 @@ void N64Recomp::CGenerator::emit_muldiv(InstrId instr_id, int reg1, int reg2) co
+             break;
+         case InstrId::cpu_div:
+             // Cast to 64-bits before division to prevent artihmetic exception for s32(0x80000000) / -1
+-            fmt::print(output_file, "lo = S32(S64(S32({0})) / S64(S32({1}))); hi = S32(S64(S32({0})) % S64(S32({1})));\n", gpr_to_string(reg1), gpr_to_string(reg2));
++            // Division by zero doesn't trap on the VR4300: lo = (dividend < 0 ? 1 : -1), hi = dividend.
++            fmt::print(output_file, "if (S32({1}) == 0) {{ lo = S32({0}) < 0 ? 1 : -1; hi = S32({0}); }} else {{ lo = S32(S64(S32({0})) / S64(S32({1}))); hi = S32(S64(S32({0})) % S64(S32({1}))); }}\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
+         case InstrId::cpu_ddiv:
+             fmt::print(output_file, "DDIV(S64({}), S64({}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
+         case InstrId::cpu_divu:
+-            fmt::print(output_file, "lo = S32(U32({0}) / U32({1})); hi = S32(U32({0}) % U32({1}));\n", gpr_to_string(reg1), gpr_to_string(reg2));
++            // Division by zero doesn't trap on the VR4300: lo = -1, hi = dividend.
++            fmt::print(output_file, "if (U32({1}) == 0) {{ lo = S32(0xFFFFFFFFu); hi = S32(U32({0})); }} else {{ lo = S32(U32({0}) / U32({1})); hi = S32(U32({0}) % U32({1})); }}\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
+         case InstrId::cpu_ddivu:
+             fmt::print(output_file, "DDIVU(U64({}), U64({}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
+diff --git a/src/recompilation.cpp b/src/recompilation.cpp
+index c228433..10e00da 100644
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -423,6 +423,11 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+                 print_indent();
+                 generator.emit_cop0_status_read(rt);
+                 break;
++            case Cop0Reg::COP0_Count:
++                // Game code reading the timer directly (the project provides recomp_cop0_count).
++                print_indent();
++                fmt::print(output_file, "ctx->r{} = (int32_t)recomp_cop0_count();\n", rt);
++                break;
+             default:
+                 fmt::print(stderr, "Unhandled cop0 register in mfc0: {}\n", (int)reg);
+                 return false;
+@@ -547,7 +552,11 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+                 }
+                 print_indent();
+                 print_indent();
+-                generator.emit_switch_error(instr_vram, cur_jtbl.vram);
++                // Handwritten tables mix entries in this function with other functions' entry points, and the
++                // table size is only known up to the first outside entry: anything else is an indirect tail call.
++                // (The table's lw is not emitted for a switch, so load the entry here.)
++                fmt::print(output_file, "default: LOOKUP_FUNC(MEM_W((int32_t)jr_addend_{:08X}, (gpr)(int32_t)0x{:08X}u))(rdram, ctx); return;\n",
++                    cur_jtbl.jr_vram, cur_jtbl.vram);
+                 print_indent();
+                 generator.emit_switch_close();
+                 break;
+@@ -832,9 +841,13 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+             if (in_likely_delay_slot) {
+                 generator.emit_goto(fmt::format("skip_{}", num_likely_branches));
+             }
+-            // If there are any other branch labels to insert and we're at the next one, insert it
+-            if (cur_label != branch_labels.end() && vram >= *cur_label) {
+-                generator.emit_label(fmt::format("L_{:08X}", *cur_label));
++            // Insert the label for this address, if any. Targets outside the function (branches and jumps out
++            // of it, emitted as tail calls) get no label: emitting one here would shift every later label
++            // back by an instruction, so a loop's branch to its head would skip the head's first instruction.
++            while (cur_label != branch_labels.end() && *cur_label <= vram) {
++                if (*cur_label == vram) {
++                    generator.emit_label(fmt::format("L_{:08X}", *cur_label));
++                }
+                 ++cur_label;
+             }
+ 
+@@ -864,6 +877,50 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+             // Advance the vram address by the size of one instruction
+             vram += 4;
+         }
++
++        // Fall-through: if the code at the end of the function can run past it (handwritten code that
++        // continues into the next function), continue there with a tail call to the function that
++        // starts at the end address.
++        auto is_unconditional = [](const rabbitizer::InstructionCpu& instr) {
++            switch (instr.getUniqueId()) {
++                case rabbitizer::InstrId::UniqueId::cpu_j:
++                case rabbitizer::InstrId::UniqueId::cpu_jr:
++                case rabbitizer::InstrId::UniqueId::cpu_b:
++                case rabbitizer::InstrId::UniqueId::cpu_eret:
++                    return true;
++                case rabbitizer::InstrId::UniqueId::cpu_beq:
++                    return instr.GetO32_rs() == rabbitizer::Registers::Cpu::GprO32::GPR_O32_zero &&
++                           instr.GetO32_rt() == rabbitizer::Registers::Cpu::GprO32::GPR_O32_zero;
++                default:
++                    return false;
++            }
++        };
++        size_t n = instructions.size();
++        bool falls_through = n == 0 || !(is_unconditional(instructions[n - 1]) || (n >= 2 && is_unconditional(instructions[n - 2])));
++        if (falls_through) {
++            uint32_t end_vram = func.vram + (uint32_t)(n * 4);
++            size_t next_index = (size_t)-1;
++            auto find_it = context.functions_by_vram.find(end_vram);
++            if (find_it != context.functions_by_vram.end()) {
++                for (size_t candidate : find_it->second) {
++                    if (context.functions[candidate].section_index == func.section_index) {
++                        next_index = candidate;
++                        break;
++                    }
++                }
++            }
++            if (next_index != (size_t)-1) {
++                fmt::print("[Info] Fall-through tail call in {} to {}\n", func.name, context.functions[next_index].name);
++                fmt::print(output_file, "    // fall-through into the next function\n");
++                fmt::print(output_file, "    ");
++                generator.emit_function_call(context, next_index);
++                fmt::print(output_file, "    ");
++                generator.emit_return(context, func_index);
++            }
++            else {
++                fmt::print(stderr, "[Warn] Function {} can fall through its end (0x{:08X}) and no function starts there\n", func.name, end_vram);
++            }
++        }
+     }
+ 
+     // Terminate the function

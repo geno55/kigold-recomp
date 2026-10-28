@@ -1,0 +1,15 @@
+diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index c47c1cd..f9d3593 100644
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -544,6 +544,10 @@ extern "C" void osViSetMode(RDRAM_ARG PTR(OSViMode) mode_) {
+     ViState* next_state = events_context.vi.get_next_state();
+     next_state->mode = mode;
+     next_state->control = next_state->mode->comRegs.ctrl;
++    // kig (patch 0008): libultra's osViSetMode assigns state = VI_STATE_MODE_UPDATED, which clears the
++    // black and repeat-line flags. KI Gold calls osViBlack(TRUE) then osViSetMode before each fight and
++    // relies on that to turn the screen back on.
++    next_state->state &= ~(VI_STATE_BLACK | VI_STATE_REPEATLINE);
+ }
+ 
+ #define OS_VI_GAMMA_ON          0x0001

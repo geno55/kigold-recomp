@@ -1,0 +1,26 @@
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+index 9d7e3e1..06906b6 100644
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -870,17 +870,8 @@ void recomp::start(const recomp::Configuration& cfg) {
+     ultramodern::join_thread_cleaner_thread();
+     ultramodern::join_saving_thread();
+     
+-    // Free rdram.
+-    bool free_failed;
+-#ifdef _WIN32
+-    // VirtualFree returns zero on failure.
+-    free_failed = (VirtualFree(rdram, 0, MEM_RELEASE) == 0);
+-#else
+-    // munmap returns -1 on failure.
+-    free_failed = (munmap(rdram, allocation_size) == -1);
+-#endif
+-
+-    if (free_failed) {
+-        printf("Failed to free rdram\n");
+-    }
++    // kig (patch 0011): rdram is not freed here. Game threads that are not the main game thread can
++    // still be running recompiled code (KI Gold's main loop runs on one, outside any OS call), and
++    // freeing it under them crashed on quit. The process exits right after this; the OS reclaims it.
++    (void)rdram;
+ }

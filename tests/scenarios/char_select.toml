@@ -1,0 +1,29 @@
+description = "Arcade character select: cursor moves right twice"
+tier = "quick"
+seconds = 40
+pak = false
+# Game state compared exactly at DUMP_RAM checkpoints: seg0's data/BSS, and the overlay area's data/BSS (seg1's,
+# and seg2's in fights). OS structures, stacks and buffers elsewhere differ by design (kig runs libultra natively).
+ram_compare = [["800425F0", "8004A100"], ["801CE500", "80295660"]]
+# 8000BBC1 = 7 from the title screen on; 802C899B = the character-select cursor (0 = Jago, +1 per D-Right).
+# The screen's own 9-second countdown picks a fighter, so the steps stay well inside it.
+# The fire along the bottom is random animation; it runs at a different rate on kig (see title_menu).
+ref_ignore = [[0, 185, 320, 240]]
+steps = """
+WAIT_RAM 8000BBC1 8 == 7 1200   # the title
+WRITE_RAM 80048310 32 0x5EED     # pin seg0's RNG (func_80032F20; the menus' fire), as on the other side
+WAIT 60
+PRESS START
+WAIT 60
+SCREENSHOT select_0
+DUMP_RAM select_0
+PRESS DR
+WAIT_RAM 802C899B 8 == 1 120
+WAIT 20
+SCREENSHOT select_1
+PRESS DR
+WAIT_RAM 802C899B 8 == 2 120
+WAIT 20
+SCREENSHOT select_2
+DUMP_RAM select_2
+"""

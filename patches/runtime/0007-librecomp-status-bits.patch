@@ -1,0 +1,23 @@
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+index 84025bb..9d7e3e1 100644
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -441,11 +441,14 @@ extern "C" void cop0_status_write(recomp_context* ctx, gpr value) {
+         changed &= ~(uint32_t)StatusReg::FR;
+     }
+ 
+-    // If any other bits were changed, assert false as they're not handled currently
++    // kig (patch 0007): other bits (CU1, IE/IM interrupt masks, ...) have no effect on recompiled code.
++    // KI Gold's handwritten code sets CU1 and toggles interrupts directly; just keep the value.
+     if (changed) {
+-        printf("Unhandled status register bits changed: 0x%08X\n", changed);
+-        assert(false);
+-        exit(EXIT_FAILURE);
++        static bool logged = false;
++        if (!logged) {
++            logged = true;
++            printf("Ignoring status register bits changed: 0x%08X\n", changed);
++        }
+     }
+     
+     // Update the status register in the context

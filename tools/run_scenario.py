@@ -1,0 +1,724 @@
+"""Scenario harness.
+
+A scenario (tests/scenarios/<name>.toml) is a repeatable path into the game: timed input, timed
+screenshots, extra KIG_* settings and expected log lines. This runs it on kig.exe (unattended) and/or
+on ares (interactive: keystrokes go to the focused window, see below), and compares the screenshots
+with approved goldens and with each other.
+
+Scenario file:
+    description = "..."
+    seconds = 20                          # run length (kig: --frames seconds*60)
+    input = [[14.0, "START"], [15.5, "Y=-1", 0.2]]   # [time, spec, optional duration]; spec as
+                                          # KIG_INPUT_SCRIPT: A B Z START L R DU DD DL DR CU CD CL CR, X=/Y=
+                                          # ("2>START" = port 2; needs KIG_FAKE_PADS and ares = false)
+    captures = [[17.0, "menu"]]           # [time, label] or [time, label, "nogolden"] (varies run to run,
+                                          # see Determinism below)
+    env = { KIG_FAKE_PADS = "4" }        # optional extra environment for kig (KIG_COUNT_SEED defaults
+                                          # to FIXED_SEED, see Determinism below)
+    steps = \"\"\"...\"\"\"                     # optional: a step script synced on game state instead of the
+                                          # timed input/captures (language: tools/refemu.py). Runs on kig
+                                          # (KIG_STEPS) and the reference emulator, not on ares.
+    ram_compare = [["8000B800", "8000C000"]]  # optional: RDRAM ranges DUMP_RAM checkpoints must match
+                                          # exactly between kig and the reference (default: report only)
+    ram_ignore = [["80048310", "80048314"]]   # optional: ranges left out of that comparison (known noise)
+    ref_tol = 40                          # optional: per-channel screenshot tolerance against the reference
+    ref_max_frac = 0.03                   # optional: share of pixels allowed beyond it
+    ref_ignore = [[0, 185, 320, 240]]     # optional: [x0, y0, x1, y1] rectangles (320x240) left out of the
+                                          # screenshot comparison (random animation)
+    ref_skip = ["fight_start"]            # optional: screenshots not compared with the reference at all
+    ref_metric = "similarity"             # optional: compare screenshots by overall structure (the golden metric,
+    ref_min_similarity = 0.85             # at least this) instead of per pixel, for screens full of random animation
+    tier = "quick"                        # optional: "quick" scenarios run after every change, the rest
+                                          # (default "full") only before a release
+    expect = ["regex", ...]               # optional: must appear in kig's stderr
+    threshold = 0.95                      # optional: golden similarity threshold (default 0.95)
+    ares = true                           # optional: false if the scenario can't run on ares
+    pak = true                            # optional: false to start without a Controller Pak (default: one
+                                          # in port 1; env KIG_PAKS overrides both)
+    controls = { keyboard_port = 2 }      # optional: start with these controls.json values (src/game/input.cpp)
+    pak_notes = 16                        # optional: port 1's pak starts with this many notes from another
+    pak_note_pages = 1                    # game, each this many 256-byte pages (16 notes = no free note
+                                          # slots; 15 x 8 pages leaves 3 of 123 pages: both "PAK IS FULL")
+
+Times are seconds from window creation. kig's clock (kig::input::script_time) counts VIs from game
+start, which is about GAME_START seconds after the window opens, so the harness subtracts that. ares
+boots about ARES_OFFSET seconds after its window opens (it runs the PIF/IPL boot), so its events are
+shifted by that much.
+
+Speed: kig runs --speed 10 by default: VIs in lockstep with the game, rendering only just before each
+capture, audio muted, and the game held on each capture's exact VI (src/main/capture.cpp). Sessions run
+--jobs 3 at a time. --speed 1 --jobs 1 is the old real-time behaviour; --frame-log forces --speed 1.
+
+Reference emulator (--target ref, or kig+ref to run both and diff them): tools/refemu.py runs a step
+scenario on the parallel_n64 libretro core (angrylion RDP, headless, unthrottled). Screenshots are compared
+with a tolerance (RT64 isn't bit-exact with the RDP) and DUMP_RAM checkpoints byte for byte over
+`ram_compare` (tools/refdiff.py). Both sides log each step with its VI ("step vi=<n> line <l>"), so the
+report shows where they drift apart.
+
+Outputs (ROM-derived, git-ignored):
+    build/scen/<name>/kig/<label>.png, build/scen/<name>/compare.png (kig next to ares or the reference)
+    ares captures: build/ref/ares/<name>/<label>.png (kept: capture once, rerun only when a scenario changes)
+    reference emulator: build/ref/emu/<name>/<label>.png|.bin, ref.log; diffs in build/scen/<name>/kig/*_diff.png
+    goldens: build/ref/scen/<name>/<label>.png (written by --update-goldens; review them!)
+
+Determinism: KIG_COUNT_SEED (set to FIXED_SEED) replaces the COP0 Count values the fight code mixes into its
+RNG (seg2 0x801B6578, src/game/kig_hooks.cpp), so CPU choices depend less on host timing. Gameplay (attract
+mode too) still drifts from run to run, so in-game timed captures are "nogolden"; step scenarios sync on
+game state instead.
+
+ares runs need --interactive: the harness focuses the ares window and sends keystrokes with SendInput.
+Before every keystroke it checks that ares is still the foreground window and aborts otherwise, so input
+never lands in another application. Don't use the mouse or keyboard during an ares run.
+
+Usage:
+    python tools/run_scenario.py all|quick|<name>... [--target kig|ares|both|ref|kig+ref] [--interactive] [--update-goldens]
+                                 [--speed N] [--jobs N]
+    python tools/run_scenario.py --list
+    python tools/run_scenario.py all --exe build/cmake-trace/kig.exe --coverage   (coverage run)
+Exit code 1 if any kig run fails (errors, missing expects, golden mismatch).
+"""
+import argparse
+import concurrent.futures
+import ctypes
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import time
+import tomllib
+from ctypes import wintypes
+from pathlib import Path
+
+import numpy as np
+from PIL import Image, ImageDraw
+
+ROOT = Path(__file__).resolve().parent.parent
+BUILD = ROOT / "build"
+EXE = BUILD / "cmake" / "kig.exe"
+# The ROM to boot: KIG_ROM, else baserom.us.z64 in the repo root (made by tools/rom_prep.py).
+ROM = Path(os.environ.get("KIG_ROM") or ROOT / "baserom.us.z64").resolve()
+SCEN_DIR = ROOT / "tests" / "scenarios"
+OUT = BUILD / "scen"
+GOLDEN = BUILD / "ref" / "scen"
+ARES_REF = BUILD / "ref" / "ares"
+EMU_REF = BUILD / "ref" / "emu"
+ARES_OFFSET = 2.5
+# kig's game starts ~0.4 s after its window opens ("[kig] game started ..." in its log); scenario times
+# were recorded from window creation.
+GAME_START = 0.4
+# KIG_COUNT_SEED: the COP0 Count values the fight RNG mixes in become a fixed sequence (src/game/kig_hooks.cpp).
+FIXED_SEED = "0x5EED"
+ERROR_PATTERNS = re.compile(r"CRASH|Failed to find function|exited unexpectedly|UnhandledJumpTarget|"
+                            r"unknown RSP task|unexpected audio ucode|Assertion|No registered RSP ucode|capture: .* FAILED|"
+                            r"step FAIL.*")
+
+
+# ---------------------------------------------------------------------------------------------
+# Image comparison (same metric as tools/verify_boot.py)
+# ---------------------------------------------------------------------------------------------
+def thumb(path, size=(64, 48)):
+    a = np.asarray(Image.open(path).convert("L").resize(size, Image.BILINEAR), dtype=np.float64)
+    a -= a.mean()
+    n = np.linalg.norm(a)
+    return a / n if n else a
+
+
+def similarity(a, b):
+    return float((thumb(a) * thumb(b)).sum())
+
+
+def load(name):
+    sc = tomllib.loads((SCEN_DIR / f"{name}.toml").read_text(encoding="utf-8"))
+    sc["name"] = name
+    sc.setdefault("input", [])
+    sc.setdefault("captures", [])
+    sc.setdefault("env", {})
+    sc.setdefault("expect", [])
+    sc.setdefault("threshold", 0.95)
+    sc.setdefault("ares", True)
+    sc.setdefault("pak", True)
+    sc.setdefault("tier", "full")
+    sc.setdefault("pak_notes", 0)
+    sc.setdefault("controls", {})
+    sc.setdefault("pak_note_pages", 1)
+    sc.setdefault("steps", None)
+    sc.setdefault("ram_compare", [])
+    sc.setdefault("ram_ignore", [])
+    sc.setdefault("ref_tol", 40)
+    sc.setdefault("ref_max_frac", 0.03)
+    sc.setdefault("ref_ignore", [])
+    sc.setdefault("ref_skip", [])
+    sc.setdefault("ref_metric", "pixels")
+    sc.setdefault("ref_min_similarity", 0.85)
+    if sc["steps"]:
+        sc["ares"] = False  # ares has no RAM access to sync on
+        # Step SCREENSHOTs are the scenario's captures (for goldens and the comparison sheet).
+        sc["captures"] = [[0, ln.split()[1]] for ln in sc["steps"].splitlines()
+                          if ln.split("#", 1)[0].split()[:1] == ["SCREENSHOT"]]
+        sc["ram_dumps"] = [ln.split()[1] for ln in sc["steps"].splitlines()
+                           if ln.split("#", 1)[0].split()[:1] == ["DUMP_RAM"]]
+    return sc
+
+
+def fill_pak(data, notes, pages):
+    """Port 1's pak with `notes` notes of `pages` pages each from another game, in ultramodern's pak layout
+    (saves/controllerpak_port1/: controllerpak_header.bin = 16 x OSPfsState, little-endian; one
+    controllerpak_file_<n>.bin per note)."""
+    d = data / "saves" / "controllerpak_port1"
+    d.mkdir(parents=True, exist_ok=True)
+    header = bytearray(16 * 32)
+    for n in range(notes):
+        # file_size, game_code, company_code, ext_name[4], game_name[16], padding
+        header[n * 32:(n + 1) * 32] = struct.pack("<IIH4s16sH", 256 * pages, 0x4E585858, 0x3031, b"\0" * 4,
+                                                  f"NOTE{n:02d}".encode().ljust(16, b"\0"), 0)
+        (d / f"controllerpak_file_{n}.bin").write_bytes(bytes(256 * pages))
+    (d / "controllerpak_header.bin").write_bytes(bytes(header))
+
+
+def game_time(t):
+    return round(max(0.0, t - GAME_START), 3)
+
+
+def input_script(sc):
+    parts = []
+    for ev in sc["input"]:
+        parts.append(f"{game_time(ev[0])}:{ev[1]}" + (f":{ev[2]}" if len(ev) > 2 else ""))
+    return ";".join(parts)
+
+
+# ---------------------------------------------------------------------------------------------
+# kig
+# ---------------------------------------------------------------------------------------------
+def run_kig(sc, update_goldens, exe=EXE, coverage=False, frame_log=False, extra_env=None, tag="", speed=1):
+    name = sc["name"]
+    out_root = OUT / (name + (f"@{tag}" if tag else ""))
+    out = out_root / "kig"
+    data = out_root / "data"
+    for d in (out, data):
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+    if sc["pak_notes"]:
+        fill_pak(data, sc["pak_notes"], sc["pak_note_pages"])
+    if sc["controls"]:
+        (data / "controls.json").write_text(json.dumps(sc["controls"], indent=4), encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("KIG_")}
+    env["KIG_COUNT_SEED"] = FIXED_SEED
+    env.update({k: str(v) for k, v in sc["env"].items()})
+    env.update(extra_env or {})
+    if sc["steps"]:
+        steps = out_root / "steps.txt"
+        steps.write_text(sc["steps"], encoding="utf-8")
+        env["KIG_STEPS"] = str(steps)
+    else:
+        env["KIG_INPUT_SCRIPT"] = input_script(sc)
+        env["KIG_CAPTURE"] = ",".join(f"{game_time(c[0])}:{c[1]}" for c in sc["captures"])
+    env["KIG_CAPTURE_DIR"] = str(out)
+    # Scenarios pin the paks (a pak in port 1 only, or none) instead of following general.json's default.
+    env.setdefault("KIG_PAKS", "1" if sc["pak"] else "none")
+    if coverage:
+        env["KIG_COVERAGE_FILE"] = str(out_root / "coverage.txt")
+    if frame_log:
+        env["KIG_FRAME_LOG"] = str(out_root / "frames.log")
+    err_path = out_root / "kig.err.txt"
+    with open(err_path, "w") as err, open(out_root / "kig.out.txt", "w") as so:
+        proc = subprocess.Popen([str(exe), "--frames", str(int(sc["seconds"] * 60)), "--speed", str(speed),
+                                 "--data-dir", str(data), str(ROM)], cwd=exe.parent, env=env, stdout=so, stderr=err)
+        try:
+            code = proc.wait(timeout=sc["seconds"] + 60)  # real time is the worst case at any speed
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            code = "timeout"
+    log = err_path.read_text(errors="replace")
+
+    problems = []
+    if code != 0:
+        problems.append(f"exit code {code}" + (" (step script failed)" if code == 3 else ""))
+    problems += sorted({f"log: {m.group(0)}" for m in ERROR_PATTERNS.finditer(log)})
+    problems += [f"missing expected log line /{p}/" for p in sc["expect"] if not re.search(p, log)]
+    for bmp in out.glob("*.bmp"):
+        Image.open(bmp).save(bmp.with_suffix(".png"))
+        bmp.unlink()
+    results = {}
+    for cap in sc["captures"]:
+        label = cap[1]
+        png = out / f"{label}.png"
+        if not png.exists():
+            problems.append(f"capture '{label}' missing")
+            continue
+        golden = GOLDEN / name / f"{label}.png"
+        if len(cap) > 2 and cap[2] == "nogolden":
+            results[label] = "captured"
+        elif update_goldens:
+            golden.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(png, golden)
+            results[label] = "golden written"
+        elif golden.exists():
+            s = similarity(golden, png)
+            results[label] = f"golden {s:.3f}"
+            if s < sc["threshold"]:
+                problems.append(f"capture '{label}' differs from golden ({s:.3f} < {sc['threshold']})")
+        else:
+            results[label] = "no golden"
+    return problems, results
+
+
+# ---------------------------------------------------------------------------------------------
+# ares (interactive)
+# ---------------------------------------------------------------------------------------------
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+gdi32 = ctypes.WinDLL("gdi32")
+user32.SetProcessDPIAware()  # real pixel sizes for GetClientRect/PrintWindow on scaled displays
+
+# ares keyboard (rawinput) key indices, for its settings.bml mapping strings "0x1/0/<index>".
+ARES_KEY_INDEX = {"X": 58, "C": 37, "Z": 60, "Return": 91, "Q": 51, "E": 39, "I": 43, "K": 45, "J": 44, "L": 46,
+                  "T": 54, "G": 41, "F": 40, "H": 42, "Up": 86, "Down": 87, "Left": 88, "Right": 89}
+# Same keys as kig's keyboard map (src/game/input.cpp): (ares setting name, key, scancode, extended)
+ARES_BINDINGS = {
+    "A": ("A", "X", 0x2D, False), "B": ("B", "C", 0x2E, False), "Z": ("Z", "Z", 0x2C, False),
+    "START": ("Start", "Return", 0x1C, False), "L": ("L", "Q", 0x10, False), "R": ("R", "E", 0x12, False),
+    "CU": ("C-Up", "I", 0x17, False), "CD": ("C-Down", "K", 0x25, False), "CL": ("C-Left", "J", 0x24, False),
+    "CR": ("C-Right", "L", 0x26, False), "DU": ("Up", "T", 0x14, False), "DD": ("Down", "G", 0x22, False),
+    "DL": ("Left", "F", 0x21, False), "DR": ("Right", "H", 0x23, False),
+    # ares v148 drops bindings on the N64 pad's L-Up/L-Down/... entries when it loads the settings file;
+    # the stick is bound through the X-Axis/Y-Axis pairs (Lo = left/up, Hi = right/down).
+    "STICK_UP": ("Y-Axis/Lo", "Up", 0x48, True), "STICK_DOWN": ("Y-Axis/Hi", "Down", 0x50, True),
+    "STICK_LEFT": ("X-Axis/Lo", "Left", 0x4B, True), "STICK_RIGHT": ("X-Axis/Hi", "Right", 0x4D, True),
+}
+
+
+def ares_exe():
+    base = Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Packages"
+    found = sorted(base.glob("ares-emulator.ares_*/ares-v*/ares.exe"))
+    return found[-1] if found else None
+
+
+def ares_settings(exe):
+    """Copy of ares's settings.bml with N64 port 1 bound to kig's keyboard keys and Input/Defocus = Block."""
+    src = (exe.parent / "settings.bml").read_text(encoding="utf-8").splitlines()
+    want = {setting: f"0x1/0/{ARES_KEY_INDEX[key]};;" for setting, key, _, _ in ARES_BINDINGS.values()}
+    out, path = [], []
+    for line in src:
+        stripped = line.lstrip(" ")
+        depth = (len(line) - len(stripped)) // 2
+        key = stripped.split(":", 1)[0]
+        path = path[:depth] + [key]
+        sub = "/".join(path[4:])
+        if path[:4] == ["Nintendo64", "Input", "Controller.Port.1", "Gamepad"] and sub in want:
+            line = " " * (depth * 2) + f"{key}: {want[sub]}"
+        # Keep emulating when unfocused (so background captures work) but ignore input then; a digital
+        # key on the stick gives full tilt at once (default modes ramp it, which short taps may not survive).
+        if path == ["Input", "Defocus"]:
+            line = " " * (depth * 2) + "Defocus: Block"
+            out.append(line)
+            line = " " * (depth * 2) + "DigitalToAnalog: Immediate"
+        elif path == ["Input", "DigitalToAnalog"]:
+            continue
+        out.append(line)
+    dst = BUILD / "ares" / "settings.bml"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return dst
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD), ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class INPUT(ctypes.Structure):
+    class _U(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT), ("pad", ctypes.c_byte * 32)]
+    _anonymous_ = ("u",)
+    _fields_ = [("type", wintypes.DWORD), ("u", _U)]
+
+
+def send_key(scancode, extended, up):
+    flags = 0x0008 | (0x0001 if extended else 0) | (0x0002 if up else 0)  # SCANCODE | EXTENDEDKEY | KEYUP
+    inp = INPUT(type=1, ki=KEYBDINPUT(0, scancode, flags, 0, 0))
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+
+def find_window(pid):
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _):
+        p = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+        if p.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+    user32.EnumWindows(cb, 0)
+    return found[0] if found else None
+
+
+def window_pid(hwnd):
+    p = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+    return p.value
+
+
+def window_title(hwnd):
+    buf = ctypes.create_unicode_buffer(256)
+    user32.GetWindowTextW(hwnd, buf, 256)
+    return buf.value
+
+
+def largest_window(pid):
+    """ares can show more than one top-level window; the game view is the largest."""
+    best, best_area = None, 0
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _):
+        nonlocal best, best_area
+        if window_pid(hwnd) == pid and user32.IsWindowVisible(hwnd):
+            rc = wintypes.RECT()
+            user32.GetClientRect(hwnd, ctypes.byref(rc))
+            if rc.right * rc.bottom > best_area:
+                best, best_area = hwnd, rc.right * rc.bottom
+        return True
+    user32.EnumWindows(cb, 0)
+    return best
+
+
+def bring_to_front(hwnd):
+    """SetForegroundWindow is refused for background processes; attaching to the current foreground
+    window's input thread for the call is the standard workaround (no keystrokes involved)."""
+    kernel32 = ctypes.WinDLL("kernel32")
+    fg = user32.GetForegroundWindow()
+    fg_thread = user32.GetWindowThreadProcessId(fg, None)
+    me = kernel32.GetCurrentThreadId()
+    attached = fg_thread and fg_thread != me and user32.AttachThreadInput(me, fg_thread, True)
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    if attached:
+        user32.AttachThreadInput(me, fg_thread, False)
+
+
+def print_window(hwnd, path):
+    rc = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(rc))
+    w, h = rc.right, rc.bottom
+    hdc_screen = user32.GetDC(None)
+    hdc = gdi32.CreateCompatibleDC(hdc_screen)
+    bmp = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
+    old = gdi32.SelectObject(hdc, bmp)
+    user32.PrintWindow(hwnd, hdc, 3)
+    gdi32.SelectObject(hdc, old)
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
+                    ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+                    ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+    bi = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
+    buf = ctypes.create_string_buffer(w * h * 4)
+    gdi32.GetDIBits(hdc, bmp, 0, h, buf, ctypes.byref(bi), 0)
+    gdi32.DeleteObject(bmp)
+    gdi32.DeleteDC(hdc)
+    user32.ReleaseDC(None, hdc_screen)
+    Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1).convert("RGB").save(path)
+
+
+def stick_keys(spec_part):
+    axis, value = spec_part.split("=")
+    v = float(value)
+    if axis == "X":
+        return ["STICK_RIGHT"] if v > 0.5 else ["STICK_LEFT"] if v < -0.5 else []
+    return ["STICK_UP"] if v > 0.5 else ["STICK_DOWN"] if v < -0.5 else []
+
+
+def run_ares(sc):
+    exe = ares_exe()
+    if not exe:
+        return ["ares not installed (winget install ares-emulator.ares)"]
+    name = sc["name"]
+    out = ARES_REF / name
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    settings = ares_settings(exe)
+    proc = subprocess.Popen([str(exe), "--kiosk", "--no-file-prompt", "--settings-file", str(settings),
+                             "--system", "Nintendo 64", str(ROM)])
+    try:
+        hwnd = None
+        for _ in range(150):
+            hwnd = find_window(proc.pid)
+            if hwnd:
+                break
+            time.sleep(0.1)
+        if not hwnd:
+            return ["ares window did not appear"]
+        t0 = time.monotonic()
+        for _ in range(5):
+            bring_to_front(hwnd)
+            time.sleep(0.3)
+            if window_pid(user32.GetForegroundWindow()) == proc.pid:
+                break
+        if window_pid(user32.GetForegroundWindow()) != proc.pid:
+            return ["could not bring ares to the foreground (click it, then rerun)"]
+
+        # Timeline of (time, kind, payload) on ares's clock.
+        events = []
+        for ev in sc["input"]:
+            t, spec = ev[0] + ARES_OFFSET, ev[1]
+            dur = ev[2] if len(ev) > 2 else 0.15
+            keys = []
+            for part in spec.split("+"):
+                keys += stick_keys(part) if "=" in part else [part]
+            for k in keys:
+                if k not in ARES_BINDINGS:
+                    return [f"no ares binding for '{k}'"]
+                events.append((t, "down", k))
+                events.append((t + dur, "up", k))
+        for c in sc["captures"]:
+            events.append((c[0] + ARES_OFFSET, "capture", c[1]))
+        events.sort(key=lambda e: (e[0], e[1] != "up"))
+
+        held = set()
+        blank_captures = []
+        try:
+            for t, kind, payload in events:
+                wait = t - (time.monotonic() - t0)
+                if wait > 0:
+                    time.sleep(wait)
+                if kind == "capture":
+                    # PrintWindow on ares's OpenGL window sometimes returns an all-black image (seen on 8
+                    # of 26 captures, including mid-gameplay frames); retry briefly before keeping one.
+                    path = out / f"{payload}.png"
+                    for attempt in range(8):
+                        print_window(largest_window(proc.pid) or hwnd, path)
+                        if np.asarray(Image.open(path).convert("L")).max() > 0:
+                            break
+                        time.sleep(0.04)
+                    else:
+                        blank_captures.append(payload)
+                    continue
+                fg = user32.GetForegroundWindow()
+                if window_pid(fg) != proc.pid:
+                    return [f"ares lost focus at {t:.1f}s (foreground: '{window_title(fg)}', pid {window_pid(fg)}); "
+                            "aborted before sending a key elsewhere"]
+                _, _, scancode, ext = ARES_BINDINGS[payload]
+                send_key(scancode, ext, kind == "up")
+                (held.discard if kind == "up" else held.add)(payload)
+        finally:
+            if window_pid(user32.GetForegroundWindow()) == proc.pid:
+                for k in held:
+                    _, _, scancode, ext = ARES_BINDINGS[k]
+                    send_key(scancode, ext, True)
+        if blank_captures:
+            return [f"ares capture still black after retries: {', '.join(blank_captures)}"]
+    finally:
+        proc.kill()
+    return []
+
+
+# ---------------------------------------------------------------------------------------------
+# Reference emulator (tools/refemu.py: parallel_n64, angrylion, headless)
+# ---------------------------------------------------------------------------------------------
+def run_ref(sc):
+    """Runs a step scenario on the reference emulator into build/ref/emu/<name>/. Returns problems."""
+    if not sc["steps"]:
+        return ["no `steps`: only step scenarios run on the reference emulator"]
+    out = EMU_REF / sc["name"]
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    cmd = [sys.executable, str(ROOT / "tools" / "refemu.py"), str(SCEN_DIR / f"{sc['name']}.toml"), "--out-dir", str(out),
+           "--rom", str(ROM), "--max-vis", str(int(sc["seconds"] * 60))]
+    if sc["pak"]:
+        cmd += ["--pak-in", str(out / "no_such_pak")]  # an empty, formatted pak, as kig's fresh data folder has
+    with open(out / "ref.log", "w") as log:
+        code = subprocess.call(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT)
+    text = (out / "ref.log").read_text(errors="replace")
+    problems = [f"exit code {code}" + (" (step script failed)" if code == 3 else "")] if code else []
+    problems += sorted({m.group(0) for m in re.finditer(r"step FAIL.*", text)})
+    return problems
+
+
+def step_vis(log_text, prefix):
+    """{step line: VI} from a "[kig]/[ref] step vi=<n> ... line <l>:" log."""
+    out = {}
+    for m in re.finditer(rf"\[{prefix}\] step vi=(\d+)\S* t=\S+ line (\d+):", log_text):
+        out.setdefault(int(m.group(2)), int(m.group(1)))
+    return out
+
+
+def diff_ref(sc, tag=""):
+    """Compares a step scenario's kig outputs with the reference's. Returns (problems, report lines)."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import refdiff
+    name = sc["name"]
+    kig_dir = OUT / (name + (f"@{tag}" if tag else "")) / "kig"
+    ref_dir = EMU_REF / name
+    problems, lines = [], []
+    # Where the two runs drift: the VI each synced step ran at on both sides.
+    kig_log = (kig_dir.parent / "kig.err.txt").read_text(errors="replace") if (kig_dir.parent / "kig.err.txt").exists() else ""
+    ref_log = (ref_dir / "ref.log").read_text(errors="replace") if (ref_dir / "ref.log").exists() else ""
+    kv, rv = step_vis(kig_log, "kig"), step_vis(ref_log, "ref")
+    sync_lines = [i + 1 for i, ln in enumerate(sc["steps"].splitlines()) if ln.split("#", 1)[0].split()[:1] == ["WAIT_RAM"]]
+    for ln in sync_lines:
+        k, r = kv.get(ln), rv.get(ln)
+        lines.append(f"sync line {ln}: kig vi {k if k is not None else '-'}, ref vi {r if r is not None else '-'}"
+                     + (f" (kig {k - r:+d})" if k is not None and r is not None else ""))
+    for _, label in sc["captures"]:
+        k, r = kig_dir / f"{label}.png", ref_dir / f"{label}.png"
+        if label in sc["ref_skip"]:
+            lines.append(f"screenshot {label}: not compared (ref_skip)")
+            continue
+        if not (k.exists() and r.exists()):
+            problems.append(f"screenshot '{label}' missing on {'kig' if not k.exists() else 'ref'}")
+            continue
+        if sc["ref_metric"] == "similarity":
+            s = similarity(k, r)
+            ok, msg = s >= sc["ref_min_similarity"], f"similarity {s:.3f} (min {sc['ref_min_similarity']})"
+        else:
+            ok, msg = refdiff.compare_images(k, r, kig_dir / f"{label}_diff.png", sc["ref_tol"], sc["ref_max_frac"],
+                                             ignore=[tuple(rc) for rc in sc["ref_ignore"]])
+        lines.append(f"screenshot {label}: {'match' if ok else 'DIFFER'}, {msg}")
+        if not ok:
+            problems.append(f"screenshot '{label}' differs from the reference")
+    ranges = [refdiff.parse_range(f"{lo}-{hi}") for lo, hi in sc["ram_compare"]]
+    ignore = [refdiff.parse_range(f"{lo}-{hi}") for lo, hi in sc["ram_ignore"]]
+    for label in sc.get("ram_dumps", []):
+        k, r = kig_dir / f"{label}.bin", ref_dir / f"{label}.bin"
+        if not (k.exists() and r.exists()):
+            problems.append(f"RAM dump '{label}' missing on {'kig' if not k.exists() else 'ref'}")
+            continue
+        ok, detail = refdiff.compare_ram(k, r, ranges or None, blocks=not ranges, ignore=ignore)
+        lines.append(f"RAM {label}: {'identical' if ok else 'DIFFER'}" + ("" if ranges else " (whole RDRAM, report only)"))
+        lines += detail
+        if ranges and not ok:
+            problems.append(f"RAM '{label}' differs from the reference in ram_compare ranges")
+    return problems, lines
+
+
+# ---------------------------------------------------------------------------------------------
+def side_by_side(sc):
+    rows = []
+    ref_root, ref_name = (EMU_REF, "reference") if sc["steps"] else (ARES_REF, "ares")
+    for c in sc["captures"]:
+        label = c[1]
+        ours = OUT / sc["name"] / "kig" / f"{label}.png"
+        theirs = ref_root / sc["name"] / f"{label}.png"
+        if ours.exists() or theirs.exists():
+            rows.append((label, ours if ours.exists() else None, theirs if theirs.exists() else None))
+    if not rows:
+        return None
+    w, h = 320, 240
+    sheet = Image.new("RGB", (2 * w, len(rows) * (h + 16)), (40, 40, 40))
+    d = ImageDraw.Draw(sheet)
+    for i, (label, a, b) in enumerate(rows):
+        y = i * (h + 16)
+        for j, p in enumerate((a, b)):
+            if p:
+                sheet.paste(Image.open(p).convert("RGB").resize((w, h)), (j * w, y + 16))
+        sim = f"  similarity {similarity(a, b):.2f}" if a and b else ""
+        d.text((4, y + 2), f"{label}: kig (left) | {ref_name} (right){sim}", fill=(255, 255, 0))
+    path = OUT / sc["name"] / "compare.png"
+    sheet.save(path)
+    return path
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("names", nargs="*")
+    ap.add_argument("--target", choices=["kig", "ares", "both", "ref", "kig+ref"], default="kig",
+                    help="both = kig and ares; ref = the reference emulator (step scenarios); kig+ref = kig and "
+                         "the reference, then diff them")
+    ap.add_argument("--interactive", action="store_true", help="required for ares runs (sends keystrokes)")
+    ap.add_argument("--update-goldens", action="store_true")
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--exe", type=Path, default=EXE, help="kig.exe to run (e.g. build/cmake-trace/kig.exe)")
+    ap.add_argument("--env", action="append", default=[], metavar="K=V", help="extra environment for kig (repeatable)")
+    ap.add_argument("--tag", default="", help="write to build/scen/<name>@<tag>/ (repeat runs side by side)")
+    ap.add_argument("--frame-log", action="store_true",
+                    help="write build/scen/<name>/frames.log for tools/frame_pacing.py")
+    ap.add_argument("--coverage", action="store_true",
+                    help="write build/scen/<name>/coverage.txt (needs a KIG_TRACE build, see --exe)")
+    ap.add_argument("--speed", type=int, default=10, help="kig game speed (1 = real time)")
+    ap.add_argument("--jobs", type=int, default=3, help="kig sessions to run at once")
+    args = ap.parse_args()
+    if args.frame_log and args.speed != 1:
+        print("--frame-log measures real-time pacing: using --speed 1")
+        args.speed = 1
+
+    all_names = sorted(p.stem for p in SCEN_DIR.glob("*.toml"))
+    if args.list or not args.names:
+        for n in all_names:
+            sc = load(n)
+            print(f"{n:22} {sc['tier']:5}  {sc.get('description', '')}")
+        return 0
+    if args.names == ["all"]:
+        names = all_names
+    elif args.names == ["quick"]:
+        names = [n for n in all_names if load(n)["tier"] == "quick"]
+    else:
+        names = args.names
+    if args.target in ("ares", "both") and not args.interactive:
+        print("ares runs send keystrokes to the ares window; pass --interactive and don't touch the keyboard/mouse.")
+        return 2
+
+    failed = False
+    start = time.time()
+    if args.target in ("ref", "kig+ref"):
+        # Headless and independent of kig: run alongside it.
+        step_names = [n for n in names if load(n)["steps"]]
+        for n in names:
+            if n not in step_names:
+                print(f"[skip] {n} ref (no steps)")
+        ref_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs))
+        ref_futures = {n: ref_pool.submit(run_ref, load(n)) for n in step_names}
+    if args.target in ("kig", "both", "kig+ref"):
+        # Each session has its own process, data folder and output folder, so they can run side by side.
+        extra = dict(kv.split("=", 1) for kv in args.env)
+
+        def one(n):
+            t = time.time()
+            problems, results = run_kig(load(n), args.update_goldens, args.exe.resolve(), args.coverage,
+                                         args.frame_log, extra, args.tag, args.speed)
+            return n, problems, results, time.time() - t
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+            for n, problems, results, secs in pool.map(one, names):
+                status = "ok" if not problems else "FAIL"
+                print(f"[{status}] {n} kig ({secs:.0f}s) " + ", ".join(f"{k}: {v}" for k, v in results.items()))
+                for p in problems:
+                    print(f"    {p}")
+                failed |= bool(problems)
+    if args.target in ("ref", "kig+ref"):
+        for n, fut in ref_futures.items():
+            problems = fut.result()
+            print(f"[{'ok' if not problems else 'FAIL'}] {n} ref" + "".join(f"\n    {p}" for p in problems))
+            failed |= bool(problems)
+            if args.target == "kig+ref" and not problems:
+                diff_problems, report = diff_ref(load(n), args.tag)
+                print(f"[{'ok' if not diff_problems else 'DIFF'}] {n} kig vs ref")
+                for line in report:
+                    print(f"    {line}")
+                for p in diff_problems:
+                    print(f"    ! {p}")
+                failed |= bool(diff_problems)
+        ref_pool.shutdown()
+    for n in names:
+        sc = load(n)
+        if args.target in ("ares", "both"):
+            if not sc["ares"]:
+                print(f"[skip] {n} ares (scenario not runnable on ares)")
+            else:
+                problems = run_ares(sc)
+                print(f"[{'ok' if not problems else 'WARN'}] {n} ares" + "".join(f"\n    {p}" for p in problems))
+        sheet = side_by_side(sc) if not args.tag else None
+        if sheet:
+            print(f"    -> {sheet.relative_to(ROOT)}")
+    print(f"total {time.time() - start:.0f}s (speed {args.speed}, {args.jobs} jobs)")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

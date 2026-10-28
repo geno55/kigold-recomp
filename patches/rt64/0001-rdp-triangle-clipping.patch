@@ -1,0 +1,197 @@
+diff --git a/src/gbi/rt64_gbi_rdp.cpp b/src/gbi/rt64_gbi_rdp.cpp
+index 6255872..fc2fa3c 100644
+--- a/src/gbi/rt64_gbi_rdp.cpp
++++ b/src/gbi/rt64_gbi_rdp.cpp
+@@ -336,6 +336,15 @@ namespace RT64 {
+             size_t workBufferIndex = 0;
+             uint32_t tile = -1;
+             uint32_t level = -1;
++            // The triangle's edges and attribute planes, for building its polygon below. Attributes are
++            // r, g, b, a (0-1), s, t, w (before the perspective divide) and z; each is linear in screen space:
++            // base + de * (y - yFloor) + dx * (x - xH(y)), with xH(y) on the major edge.
++            float planeBase[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
++            float planeDe[8] = {};
++            float planeDx[8] = {};
++            float edgeYh = 0.0f, edgeYm = 0.0f, edgeYl = 0.0f, edgeYFloor = 0.0f;
++            float edgeXh = 0.0f, edgeDxh = 0.0f, edgeXm = 0.0f, edgeDxm = 0.0f, edgeXl = 0.0f, edgeDxl = 0.0f;
++            bool anyTextured = false;
+ 
+             for (const DisplayList* curData : triangles) {
+                 uint32_t commandId = (curData[0].w0 >> 24) & 0x3F;
+@@ -420,6 +429,9 @@ namespace RT64 {
+                 // Calculate x distance from the point opposite vertex 3 to vertex 3 itself.
+                 float dx_3 = x3 - x3_opposite;
+ 
++                edgeYh = yh; edgeYm = ym; edgeYl = yl; edgeYFloor = yFloor;
++                edgeXh = xh; edgeDxh = dxhdy; edgeXm = xm; edgeDxm = dxmdy; edgeXl = xl; edgeDxl = dxldy;
++
+                 if (shaded) {
+                     hlslpp::int4 baseColorFixed{
+                         ((curData[0].w0 >> 16) << 16) | (curData[2].w0 >> 16),
+@@ -467,6 +479,11 @@ namespace RT64 {
+                     colorWorkBuffer[workBufferIndex + 0] = v1Color * (1/255.0f);
+                     colorWorkBuffer[workBufferIndex + 1] = v2Color * (1/255.0f);
+                     colorWorkBuffer[workBufferIndex + 2] = v3Color * (1/255.0f);
++                    for (int c = 0; c < 4; c++) {
++                        planeBase[c] = baseColor[c] / 255.0f;
++                        planeDe[c] = colorDe[c] / 255.0f;
++                        planeDx[c] = colorDx[c] / 255.0f;
++                    }
+ 
+                     curData += triangleShadeWords;
+                 }
+@@ -478,6 +495,7 @@ namespace RT64 {
+                 }
+ 
+                 if (textured) {
++                    anyTextured = true;
+                     hlslpp::int3 baseTexcoordFixed{
+                         ((curData[0].w0 >> 16) << 16) | (curData[2].w0 >> 16),
+                         ((curData[0].w0 & 0xFFFF) << 16) | (curData[2].w0 & 0xFFFF),
+@@ -520,6 +538,11 @@ namespace RT64 {
+                     hlslpp::float2 v2_texcoord = baseTexcoord.xy + texcoordDe.xy * dy_2;
+                     hlslpp::float2 v3_opposite_texcoord = baseTexcoord.xy + texcoordDe.xy * dy_3;
+                     hlslpp::float2 v3_texcoord = v3_opposite_texcoord + texcoordDx.xy * dx_3;
++                    for (int c = 0; c < 3; c++) {
++                        planeBase[4 + c] = baseTexcoord[c];
++                        planeDe[4 + c] = texcoordDe[c];
++                        planeDx[4 + c] = texcoordDx[c];
++                    }
+                     if (texturePerspective) {
+                         posWorkBuffer[workBufferIndex + 0].w = 65536000.0f / w1;
+                         posWorkBuffer[workBufferIndex + 1].w = 65536000.0f / w2;
+@@ -570,6 +593,9 @@ namespace RT64 {
+                     posWorkBuffer[workBufferIndex + 0].z = v1Depth;
+                     posWorkBuffer[workBufferIndex + 1].z = v2Depth;
+                     posWorkBuffer[workBufferIndex + 2].z = v3Depth;
++                    planeBase[7] = baseDepth;
++                    planeDe[7] = depthDe;
++                    planeDx[7] = depthDx;
+ 
+                     curData += triangleDepthWords;
+                 }
+@@ -584,7 +610,123 @@ namespace RT64 {
+                 break;
+             }
+ 
+-            state->rdp->drawTris(1, &posWorkBuffer.data()[0][0], &texcoordWorkBuffer.data()[0][0], &colorWorkBuffer[0][0], tile, level);
++            // Build the triangle's polygon and clip it to the scissor before handing it to the GPU (kig patch).
++            // - The RDP fills between the major edge H and the minor edge M from YH to YM, then between H and
++            //   the minor edge L from YM to YL. RT64 assumed M and L meet at (XL, YM), as they do for an ordinary
++            //   triangle; KI Gold's CPU-built lists also send rectangles (H and M vertical, YM = YL), which that
++            //   turned into a zero-area triangle, so the area (the fight's sky) was never drawn. Each part is
++            //   built as its own trapezoid instead.
++            // - The corners of large triangles (KI Gold's CPU-built floors) lie far outside the drawn area;
++            //   extrapolated there, the perspective W can be zero or negative, and the GPU then clips or warps
++            //   the whole triangle (flickering/white floors). So the trapezoids are clipped to the scissor first.
++            // Colour, S, T, W and Z are linear in screen space, so they are evaluated exactly at every corner,
++            // where the real RDP evaluates them.
++            struct ClipVertex {
++                float x, y, z;
++                float r, g, b, a;
++                float s, t, w;
++            };
++            auto lerpVertex = [](const ClipVertex &p, const ClipVertex &q, float f) {
++                ClipVertex o;
++                o.x = p.x + (q.x - p.x) * f; o.y = p.y + (q.y - p.y) * f; o.z = p.z + (q.z - p.z) * f;
++                o.r = p.r + (q.r - p.r) * f; o.g = p.g + (q.g - p.g) * f; o.b = p.b + (q.b - p.b) * f; o.a = p.a + (q.a - p.a) * f;
++                o.s = p.s + (q.s - p.s) * f; o.t = p.t + (q.t - p.t) * f; o.w = p.w + (q.w - p.w) * f;
++                return o;
++            };
++            auto xOnH = [&](float y) { return edgeXh + edgeDxh * (y - edgeYFloor); };
++            auto xOnM = [&](float y) { return edgeXm + edgeDxm * (y - edgeYFloor); };
++            auto xOnL = [&](float y) { return edgeXl + edgeDxl * (y - edgeYm); };
++            auto corner = [&](float x, float y) {
++                float v[8];
++                for (int c = 0; c < 8; c++) {
++                    v[c] = planeBase[c] + planeDe[c] * (y - edgeYFloor) + planeDx[c] * (x - xOnH(y));
++                }
++                return ClipVertex{ x, y, v[7], v[0], v[1], v[2], v[3], v[4], v[5], v[6] };
++            };
++
++            const FixedRect &scissor = state->rdp->scissorRectStack[state->rdp->scissorStackSize - 1];
++            const float clipBounds[4] = { scissor.ulx / 4.0f, scissor.uly / 4.0f, scissor.lrx / 4.0f, scissor.lry / 4.0f };
++            static thread_local std::vector<ClipVertex> clippedTris;
++            clippedTris.clear();
++            auto clipAndAdd = [&](ClipVertex *polyA, int polyCount) {
++                ClipVertex polyB[12];
++                ClipVertex *in = polyA, *out = polyB;
++                for (int plane = 0; (plane < 4) && (polyCount >= 3); plane++) {
++                    auto dist = [&](const ClipVertex &v) {
++                        switch (plane) {
++                        case 0: return v.x - clipBounds[0];
++                        case 1: return v.y - clipBounds[1];
++                        case 2: return clipBounds[2] - v.x;
++                        default: return clipBounds[3] - v.y;
++                        }
++                    };
++                    int outCount = 0;
++                    for (int v = 0; v < polyCount; v++) {
++                        const ClipVertex &cur = in[v];
++                        const ClipVertex &nxt = in[(v + 1) % polyCount];
++                        float dc = dist(cur), dn = dist(nxt);
++                        if (dc >= 0.0f) {
++                            out[outCount++] = cur;
++                        }
++                        if ((dc >= 0.0f) != (dn >= 0.0f)) {
++                            out[outCount++] = lerpVertex(cur, nxt, dc / (dc - dn));
++                        }
++                    }
++                    polyCount = outCount;
++                    std::swap(in, out);
++                }
++                for (int t = 1; t + 1 < polyCount; t++) {
++                    clippedTris.push_back(in[0]);
++                    clippedTris.push_back(in[t]);
++                    clippedTris.push_back(in[t + 1]);
++                }
++            };
++            if (edgeYm > edgeYh) {
++                ClipVertex upper[12] = { corner(xOnH(edgeYh), edgeYh), corner(xOnM(edgeYh), edgeYh),
++                                         corner(xOnM(edgeYm), edgeYm), corner(xOnH(edgeYm), edgeYm) };
++                clipAndAdd(upper, 4);
++            }
++            if (edgeYl > edgeYm) {
++                const float yTop = std::max(edgeYm, edgeYh);
++                ClipVertex lower[12] = { corner(xOnH(yTop), yTop), corner(xOnL(yTop), yTop),
++                                         corner(xOnL(edgeYl), edgeYl), corner(xOnH(edgeYl), edgeYl) };
++                clipAndAdd(lower, 4);
++            }
++
++            if (!clippedTris.empty()) {
++                const size_t vertCount = clippedTris.size();
++                setMinSize(posWorkBuffer, vertCount);
++                setMinSize(colorWorkBuffer, vertCount);
++                setMinSize(texcoordWorkBuffer, vertCount);
++                // The largest |W| across the polygon bounds how far the clamp below may reach.
++                float maxW = 0.0f;
++                for (const ClipVertex &v : clippedTris) {
++                    maxW = std::max(maxW, std::fabs(v.w));
++                }
++                const float minW = std::max(maxW * 1e-4f, 1e-6f);
++                auto emit = [&](size_t index, const ClipVertex &v) {
++                    interop::float4 &p = posWorkBuffer[index];
++                    p.x = v.x; p.y = v.y; p.z = v.z;
++                    colorWorkBuffer[index] = interop::float4(v.r, v.g, v.b, v.a);
++                    if (anyTextured && texturePerspective) {
++                        const float w = std::max(v.w, minW);
++                        p.w = 65536000.0f / w;
++                        texcoordWorkBuffer[index] = interop::float2((v.s / w) * 1024.0f, (v.t / w) * 1024.0f);
++                    }
++                    else if (anyTextured) {
++                        p.w = 1.0f;
++                        texcoordWorkBuffer[index] = interop::float2((v.s * 1024.0f) / 16384.0f, (v.t * 1024.0f) / 16384.0f);
++                    }
++                    else {
++                        p.w = 1.0f;
++                        texcoordWorkBuffer[index] = interop::float2(0.0f, 0.0f);
++                    }
++                };
++                for (size_t v = 0; v < vertCount; v++) {
++                    emit(v, clippedTris[v]);
++                }
++                state->rdp->drawTris((uint32_t)(vertCount / 3),&posWorkBuffer.data()[0][0], &texcoordWorkBuffer.data()[0][0], &colorWorkBuffer[0][0], tile, level);
++            }
+ 
+             return trianglesEnd;
+         }

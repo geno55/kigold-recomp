@@ -1,0 +1,35 @@
+description = "Arcade fight lost by an idle player, then the CONTINUE countdown"
+tier = "quick"
+seconds = 120
+pak = false
+# Game state compared exactly at DUMP_RAM checkpoints: seg0's data/BSS, and the overlay area's data/BSS (seg1's,
+# and seg2's in fights). OS structures, stacks and buffers elsewhere differ by design (kig runs libultra natively).
+ram_compare = [["800425F0", "8004A100"], ["801CE500", "80295660"]]
+# 802D35AA: 0x10 while the fight is loaded, then the CONTINUE digit (9 down to 0, 100 VIs each).
+# The arcade ladder (opponent order, 80128230-8012823A; position 8012823B) is shuffled from seg0's RNG
+# during the logos and attract mode (seg1 0x801B5354), so it differs between the two sides; it is pinned at
+# the title to the reference's own order (Orchid, on the helipad, first). The fight itself still differs
+# (the fight RNG mixes in COP0 Count), so fight_start is not compared.
+ref_skip = ["fight_start"]
+steps = """
+WAIT_RAM 8000BBC1 8 == 7 1200   # the title
+WRITE_RAM 80048310 32 0x5EED     # pin seg0's RNG (func_80032F20; the menus' fire), as on the other side
+WRITE_RAM 80128230 32 0x08070901 # pin the arcade ladder: 8 7 9 1 4 0 3 6 2 5 10
+WRITE_RAM 80128234 32 0x04000306
+WRITE_RAM 80128238 32 0x02050A00 # ... and the position in it (8012823B = 0)
+WAIT 60
+PRESS START
+WAIT 120
+WRITE_RAM 80048310 32 0x5EED     # again: the fire has drawn from it at a different rate on each side
+PRESS A                          # Jago
+WAIT_RAM 802D35AA 8 == 0x10 1200 # the fight is loaded
+WAIT 240
+SCREENSHOT fight_start
+WAIT_RAM 802D35AA 8 == 9 6000    # CONTINUE: the CPU beat the idle player
+WAIT 30
+SCREENSHOT continue_9
+DUMP_RAM continue_9
+WAIT_RAM 802D35AA 8 == 5 600
+WAIT 30
+SCREENSHOT continue_5
+"""

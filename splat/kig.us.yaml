@@ -1,0 +1,70 @@
+﻿# splat config for analysis, not for building. Runs on build/kig.recomp.z64 (tools/build_recomp_rom.py):
+# the original ROM with the inflated code segments appended (layout: tools/kig_layout.py).
+# Run from the project root: python -m splat split splat/kig.us.yaml
+name: Killer Instinct Gold (US Rev 2)
+options:
+  basename: kig
+  target_path: build/kig.recomp.z64
+  base_path: ..
+  platform: n64
+  compiler: IDO
+  find_file_boundaries: True
+  header_encoding: ASCII
+  disassemble_all: True
+  symbol_addrs_path: [syms/libultra_symbols.txt]
+  asm_path: build/splat/asm
+  src_path: build/splat/src
+  build_path: build/splat/build
+  ld_script_path: build/splat/kig.ld
+  undefined_funcs_auto_path: build/splat/undefined_funcs_auto.txt
+  undefined_syms_auto_path: build/splat/undefined_syms_auto.txt
+  hardware_regs: True
+  mips_abi_float_regs: o32
+  create_undefined_funcs_auto: True
+  create_undefined_syms_auto: True
+segments:
+  - name: header
+    type: header
+    start: 0x0
+  - name: ipl3
+    type: bin
+    start: 0x40
+  # Boot stub (uncompressed): loader, the inflater and a minimal libultra.
+  - name: boot
+    type: code
+    start: 0x1000
+    vram: 0x80000400
+    subsegments:
+      - [0x1000, asm]
+      - [0x7160, data]   # inflate tables (border/cplens/...) from 0x80006560
+  - name: rom_data
+    type: bin
+    start: 0x7EC0
+  # seg0 (segment table entry 0): libultra, scheduler, the game's core. Static once inflated.
+  - name: seg0
+    type: code
+    start: 0xC00000
+    vram: 0x8000F960
+    subsegments:
+      - [0xC00000, asm]
+      - [0xC32C90, bin, rsp_ucode]   # rspboot 800425F0, F3D 2.0E text 800426C0, aspMain text 80043AD0
+      - [0xC34F90, data]
+  # seg1 (entry 1): front end, overlay at 0x801ACB20.
+  - name: seg1
+    type: code
+    start: 0xC3A7A0
+    vram: 0x801ACB20
+    exclusive_ram_id: overlay_801A
+    subsegments:
+      - [0xC3A7A0, asm]
+      - [0xC5C180, data]
+  # seg2 (entry 2): fight, overlay at 0x801AD900.
+  - name: seg2
+    type: code
+    start: 0xD232E0
+    vram: 0x801AD900
+    exclusive_ram_id: overlay_801A
+    subsegments:
+      - [0xD232E0, asm]
+      - [0xD399C0, data]
+  - [0xD48CA0]

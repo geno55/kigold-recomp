@@ -1,0 +1,177 @@
+# Library functions identified by hand (tools/kig_libsyms.py applies these after the wg3d match).
+# Mostly tiny functions whose instruction shape matches several wg3d names; told apart by the
+# register/address they use.
+
+[[name]]
+section = "boot"
+vram = 0x80003374
+name = "viMgrMain"
+reason = "VI manager thread: __osViGetCurrentContext, osRecvMesg loop, __osViSwapContext"
+
+[[name]]
+section = "boot"
+vram = 0x800044C8
+name = "__osDispatchThread"
+reason = "wg3d match breaks once the body keeps its trailing delay slot (eret path); restores context and erets"
+
+[[name]]
+section = "boot"
+vram = 0x80003630
+name = "osSpTaskYield"
+reason = "__osSpSetStatus(SP_SET_YIELD 0x400)"
+
+[[name]]
+section = "boot"
+vram = 0x80003B30
+name = "osViGetCurrentFramebuffer"
+reason = "reads __osViCurr (0x80007040)->framebuffer"
+
+[[name]]
+section = "boot"
+vram = 0x80003B70
+name = "osViGetNextFramebuffer"
+reason = "reads __osViNext (0x80007044)->framebuffer"
+
+[[name]]
+section = "boot"
+vram = 0x80003CE0
+name = "__osGetSR"
+reason = "mfc0 Status"
+
+[[name]]
+section = "boot"
+vram = 0x800057F0
+name = "osGetCount"
+reason = "mfc0 Count"
+
+[[name]]
+section = "boot"
+vram = 0x800064F0
+name = "__osGetCause"
+reason = "mfc0 Cause"
+
+[[name]]
+section = "boot"
+vram = 0x80004A90
+name = "__osPiCreateAccessQueue"
+reason = "next to the PI functions; seg0 has the SI copy"
+
+[[name]]
+section = "boot"
+vram = 0x80004AE0
+name = "__osPiGetAccess"
+reason = "PI access queue"
+
+[[name]]
+section = "boot"
+vram = 0x80004B24
+name = "__osPiRelAccess"
+reason = "PI access queue"
+
+[[name]]
+section = "boot"
+vram = 0x80005350
+name = "__osViInit"
+reason = "clears the two VI contexts at 0x80006FE0, sets __osViCurr/__osViNext"
+
+[[name]]
+section = "boot"
+vram = 0x80005C70
+name = "__osSpDeviceBusy"
+reason = "SP_STATUS (0xA4040010) & 0x1C"
+
+[[name]]
+section = "boot"
+vram = 0x80005CA0
+name = "__osSpGetStatus"
+reason = "returns SP_STATUS (0xA4040010)"
+
+[[name]]
+section = "boot"
+vram = 0x80005CB0
+name = "__osDpDeviceBusy"
+reason = "DPC_STATUS (0xA410000C) & DMA_BUSY"
+
+[[name]]
+section = "boot"
+vram = 0x80005CE0
+name = "__osSiDeviceBusy"
+reason = "SI_STATUS (0xA4800018) & 3"
+
+[[name]]
+section = "seg0"
+vram = 0x80039990
+name = "osAiGetLength"
+reason = "returns AI_LEN (0xA4500004)"
+
+[[name]]
+section = "seg0"
+vram = 0x8003B150
+name = "__osSiCreateAccessQueue"
+reason = "precedes __osSiRawStartDma; boot has the PI copy"
+
+[[name]]
+section = "seg0"
+vram = 0x8003B1A0
+name = "__osSiGetAccess"
+reason = "called by the EEPROM and controller code"
+
+[[name]]
+section = "seg0"
+vram = 0x8003B1E4
+name = "__osSiRelAccess"
+reason = "SI access queue"
+
+[[name]]
+section = "seg0"
+vram = 0x800372F0
+name = "osUnmapTLB"
+reason = "tlbwi of an invalid entry at index a0"
+
+[[name]]
+section = "seg0"
+vram = 0x80037330
+name = "osMapTLB"
+reason = "PageMask/EntryHi/EntryLo then tlbwi"
+
+[[name]]
+section = "seg0"
+vram = 0x8003CA9C
+name = "__osEepStatus"
+reason = "SI command 0 (status) on channel 4"
+
+[[name]]
+section = "seg0"
+vram = 0x8003C7E0
+name = "osEepromWrite"
+reason = "SiGetAccess, __osEepStatus, pack write data, __osSiRawStartDma"
+
+[[name]]
+section = "seg0"
+vram = 0x8003CDA0
+name = "osEepromRead"
+reason = "SiGetAccess, __osEepStatus, pack read data, __osSiRawStartDma"
+
+[[name]]
+section = "seg0"
+vram = 0x800365D0
+name = "osEepromProbe"
+reason = "SiGetAccess, __osEepStatus, SiRelAccess"
+
+[[name]]
+section = "seg0"
+vram = 0x80036640
+name = "osEepromLongWrite"
+reason = "osEepromWrite per block with a 15 ms osSetTimer wait"
+
+[[name]]
+section = "seg0"
+vram = 0x80035C80
+name = "osPfsNumFiles"
+reason = "__osCheckId, __osPfsSelectBank, then counts used directory entries; writes *files_used, *max_files"
+
+[[name]]
+section = "seg0"
+vram = 0x80036780
+name = "osEepromLongRead"
+reason = "osEepromRead per block"

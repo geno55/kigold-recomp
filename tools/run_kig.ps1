@@ -1,0 +1,25 @@
+# Runs build\cmake\kig.exe for a bounded time and captures its output (debug helper).
+# Usage: tools\run_kig.ps1 [-Seconds 30] [-Name run] [-Trace <file>] [extra kig.exe args...]
+# Writes build\<Name>.out.txt / build\<Name>.err.txt and prints their tails.
+param(
+    [int]$Seconds = 30,
+    [string]$Name = "run",
+    [string]$Trace = "",
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest
+)
+$root = Split-Path -Parent $PSScriptRoot
+$exe = Join-Path $root "build\cmake\kig.exe"
+$out = Join-Path $root "build\$Name.out.txt"
+$err = Join-Path $root "build\$Name.err.txt"
+if ($Trace) { $env:KIG_TRACE_FILE = $Trace } else { Remove-Item Env:KIG_TRACE_FILE -ErrorAction SilentlyContinue }
+$args_ = @{ FilePath = $exe; WorkingDirectory = (Split-Path $exe); RedirectStandardOutput = $out; RedirectStandardError = $err; PassThru = $true; NoNewWindow = $true }
+if ($Rest) { $args_.ArgumentList = $Rest }
+$p = Start-Process @args_
+if (-not $p.WaitForExit($Seconds * 1000)) {
+    Stop-Process -Id $p.Id -Force
+    "[run_kig] still running after $Seconds s (killed)"
+} else {
+    "[run_kig] exited, code 0x{0:X8}" -f $p.ExitCode
+}
+"---- stdout (tail)"; Get-Content $out -Tail 20
+"---- stderr (tail)"; Get-Content $err -Tail 60

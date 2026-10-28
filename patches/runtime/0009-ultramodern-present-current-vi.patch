@@ -1,0 +1,25 @@
+diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index f9d3593..9919a6a 100644
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -289,13 +289,16 @@ void vi_thread_func() {
+             events_context.action_queue.enqueue(DummyWorkloadAction{events_context.vi.get_next_state()->framebuffer});
+         }
+ 
+-        // Queue a screen update for the graphics thread with the current VI register state.
+-        // Doing this before the VI update is equivalent to updating the screen after the previous frame's scanout finished.
+-        events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
+-
+         // Update VI registers and swap VI modes.
+         events_context.vi.update_vi();
+ 
++        // Queue a screen update for the graphics thread with the VI register state that is current from
++        // this VI on. kig (patch 0009): upstream queued the previous VI's registers (before update_vi), so
++        // the presented buffer lagged one VI behind osViGetCurrentFramebuffer. KI Gold's scheduler draws
++        // into whichever buffer is neither current nor next, which then could still be on screen: frames
++        // were sometimes presented out of order (intro/title flicker).
++        events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
++
+         // kig (patch 0005): a paused game gets no VI/AI messages and no VI callback.
+         if (game_paused.load()) {
+             continue;

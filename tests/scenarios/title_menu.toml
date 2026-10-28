@@ -1,0 +1,30 @@
+description = "Title screen and its ARCADE/TEAM menu"
+tier = "quick"
+seconds = 30
+pak = false
+# Game state compared exactly at DUMP_RAM checkpoints: seg0's data/BSS, and the overlay area's data/BSS (seg1's,
+# and seg2's in fights). OS structures, stacks and buffers elsewhere differ by design (kig runs libultra natively).
+ram_compare = [["800425F0", "8004A100"], ["801CE500", "80295660"]]
+# The title fire is random (seg0's RNG at 80048310, ~4,000-8,000 draws per update), so the two sides' fires
+# match only statistically: screenshots are compared by structure, and the RNG word is left out of the RAM check.
+# The fire also differs for its first ~1-2 seconds: during the logo's fly-in the game runs a 5-update warm-up
+# every frame (seg1 0x801B1C7C), and the N64's CPU needs ~2.5 VIs for such a frame where kig needs one, so kig
+# pre-heats the fire about twice as much. From ~2 s on, kig, the reference and ares look alike; the
+# checkpoints are taken there.
+ref_metric = "similarity"
+ram_ignore = [["80048310", "80048314"]]
+# Synced on game state (tools/refemu.py documents the step language); runs on kig and the reference emulator.
+# 8000BBC1 = 7 from the title screen on (0 during the logos).
+steps = """
+WAIT_RAM 8000BBC1 8 == 7 1200   # the title, after the logos
+WAIT 300                         # past the fly-in's warm-up (see above)
+SCREENSHOT title
+DUMP_RAM title
+PRESS DD
+WAIT 30
+SCREENSHOT title_team
+PRESS DU
+WAIT 30
+SCREENSHOT title_arcade
+DUMP_RAM title_arcade
+"""

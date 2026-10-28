@@ -1,0 +1,16 @@
+# RSPRecomp config for the audio microcode: the standard aspMain, in seg0 (text 0x80043AD0, data
+# 0x80049E40; byte-identical text to the copy W.G. 3D Hockey ships, tools/kig_layout.py).
+# seg0 is compressed in the ROM, so this reads the inflated copy in build/kig.recomp.z64
+# (tools/build_recomp_rom.py): seg0 starts there at 0xC00000.
+text_offset = 0xC34170       # 0xC00000 + (0x80043AD0 - 0x8000F960)
+text_size = 0xE20
+text_address = 0x04001080    # IMEM load address after rspboot
+rom_file_path = "build/kig.recomp.z64"
+output_file_path = "rsp/aspMain.cpp"
+output_function_name = "aspMain"
+# Audio command dispatch table (16 x u16 IMEM addresses at aspMain data + 0x10; same as wg3d's).
+extra_indirect_branch_targets = [
+    0x1118, 0x1470, 0x11DC, 0x1B38, 0x1214, 0x187C, 0x1254, 0x12D0,
+    0x12EC, 0x1328, 0x140C, 0x1294, 0x1E24, 0x138C, 0x170C, 0x144C,
+]
+unsupported_instructions = []
