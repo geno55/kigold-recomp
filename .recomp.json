@@ -11,6 +11,5 @@
   "toolchain": "N64recomp",
   "approach": "Static recompilation with N64Recomp and N64ModernRuntime, RT64 renderer",
   "maintainers": [{ "name": "geno55", "link": "https://github.com/geno55" }],
-  "help": ["Checking every character and stage", "Verifying saves"],
   "notes": "Plays through the intro, title screen, character select, full fights and the Continue screen with graphics, sound and input. Saves, every character and stage, and a comparison against the original hardware are still to be checked."
 }
