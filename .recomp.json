@@ -1,0 +1,16 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Killer Instinct Gold",
+  "wikidata": "Q13743368",
+  "system": "N64",
+  "type": "recomp",
+  "original": { "region": "USA", "revision": "Rev 2 (v1.2)", "sha1": "aaeb492b1e538af65a3544a97240675ef438a04f" },
+  "project": "Killer Instinct Gold: Recompiled",
+  "status": "in-progress",
+  "targets": ["Windows"],
+  "toolchain": "N64recomp",
+  "approach": "Static recompilation with N64Recomp and N64ModernRuntime, RT64 renderer",
+  "maintainers": [{ "name": "geno55", "link": "https://github.com/geno55" }],
+  "help": ["Checking every character and stage", "Verifying saves"],
+  "notes": "Plays through the intro, title screen, character select, full fights and the Continue screen with graphics, sound and input. Saves, every character and stage, and a comparison against the original hardware are still to be checked."
+}
