@@ -2,19 +2,26 @@ description = "Two players: player 2 joins at character select, both pick, playe
 tier = "quick"
 seconds = 90
 pak = false
-# START on port 2 at the character select joins player 2. The fight's RNG mixes in COP0 Count, so the
-# fight screenshots aren't compared; the select screen is (minus its random fire, as in char_select).
+env = { KIG_FAKE_PADS = "2" }   # a controller on port 2 (the reference has every port plugged in)
+# START on port 2 at the character select joins player 2. Player 2's cursor starts on the arcade
+# ladder's next opponent (80128230 + 8012823B), and the ladder is shuffled at random, so it is pinned
+# to the reference's order as in continue.toml. The fight's RNG mixes in COP0 Count, so the fight
+# screenshots aren't compared; the select screen is (minus its random fire, as in char_select).
 ref_ignore = [[0, 185, 320, 240]]
 ref_skip = ["versus", "fight_start", "fight_play"]
 steps = """
 WAIT_RAM 8000BBC1 8 == 7 1200   # the title
 WRITE_RAM 80048310 32 0x5EED     # pin seg0's RNG
+WRITE_RAM 80128230 32 0x08070901 # pin the arcade ladder: 8 7 9 1 4 0 3 6 2 5 10
+WRITE_RAM 80128234 32 0x04000306
+WRITE_RAM 80128238 32 0x02050A00 # ... and the position in it (8012823B = 0)
 WAIT 60
 PRESS START
 WAIT 60
 PRESS 2>START                    # player 2 joins
 WAIT 60
 SCREENSHOT select_2p
+DUMP_RAM select_2p
 PRESS 2>DL                       # player 2 moves off the default fighter
 WAIT 30
 PRESS A                          # player 1: Jago
