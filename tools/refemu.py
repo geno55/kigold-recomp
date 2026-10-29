@@ -20,6 +20,7 @@ scenarios/*.toml) or a .steps file; one tick per VI (one retro_run here, one VI 
                                                  copy those ranges of a big-endian dump (the other side's
                                                  DUMP_RAM) into RDRAM, to start both sides from one game state
     SAVE_STATE <file> / LOAD_STATE <file>        core snapshots (this side only; kig skips them)
+    REPEAT <n> ... END                           the enclosed steps n times (unrolled at load; nestable)
     EXIT [code]
   Addresses are hex KSEG0/KSEG1 (801D8806); values decimal or 0x hex. spec is kig's input spec:
   '+'-joined A B Z START L R DU DD DL DR CU CD CL CR, X=<f> / Y=<f> stick (-1..1, Y up), "2>" = port 2.
@@ -274,6 +275,24 @@ def load_steps(path):
         if line:
             tok = line.split()
             out.append((n, tok[0].upper(), tok[1:]))
+    return expand_repeats(out)
+
+
+def expand_repeats(steps):
+    """REPEAT <n> ... END blocks (nestable) unrolled; each copy keeps its source line numbers."""
+    out, stack = [], []
+    for step in steps:
+        if step[1] == "REPEAT":
+            stack.append((int(step[2][0], 0), len(out)))
+        elif step[1] == "END":
+            if not stack:
+                raise SystemExit(f"line {step[0]}: END without REPEAT")
+            count, start = stack.pop()
+            out += out[start:] * (count - 1)
+        else:
+            out.append(step)
+    if stack:
+        raise SystemExit("REPEAT without END")
     return out
 
 

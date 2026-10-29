@@ -246,6 +246,7 @@ void kig::steps::init() {
     }
     std::string text;
     int line = 0;
+    std::vector<std::pair<uint32_t, size_t>> repeats;  // open REPEAT blocks: count, first step
     while (std::getline(f, text)) {
         line++;
         text = text.substr(0, text.find('#'));
@@ -254,7 +255,31 @@ void kig::steps::init() {
         if (!(ss >> s.op)) continue;
         for (char& c : s.op) c = (char)std::toupper((unsigned char)c);
         for (std::string arg; ss >> arg;) s.args.push_back(arg);
+        // REPEAT <n> ... END (nestable): unrolled here, each copy keeping its source line numbers.
+        if (s.op == "REPEAT") {
+            repeats.emplace_back(s.args.empty() ? 1 : parse_u32(s.args[0]), script.size());
+            continue;
+        }
+        if (s.op == "END") {
+            if (repeats.empty()) {
+                std::fprintf(stderr, "[kig] steps: line %d: END without REPEAT\n", line);
+                result = 3;
+                finished = true;
+                return;
+            }
+            auto [count, start] = repeats.back();
+            repeats.pop_back();
+            const std::vector<Step> body(script.begin() + start, script.end());
+            for (uint32_t i = 1; i < count; i++) script.insert(script.end(), body.begin(), body.end());
+            continue;
+        }
         script.push_back(std::move(s));
+    }
+    if (!repeats.empty()) {
+        std::fprintf(stderr, "[kig] steps: REPEAT without END\n");
+        result = 3;
+        finished = true;
+        return;
     }
     std::fprintf(stderr, "[kig] steps: %zu from %s\n", script.size(), path);
 }

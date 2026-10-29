@@ -1,0 +1,87 @@
+description = "Arcade: an attacking player beats the first opponent and starts the second fight"
+tier = "full"
+seconds = 200
+pak = false
+ram_compare = [["800425F0", "8004A100"], ["801CE500", "80295660"]]
+# The ladder (80128230-8012823A) is pinned to the reference's order, as in continue.toml: Orchid, then
+# Sabrewulf. Fighter health is a byte at slot +0x54 (shown copy +0x56) of the fight's entity slots
+# (801D34C0 + 0x100 each; Jago in slot 0, the CPU in slot 1), out of 120 and refilled once for the second
+# bar. To win reliably, Orchid starts at 1 and Jago is topped up twice per attack cycle; the mashing
+# takes her first bar and the round goes to Jago on time. 8012823B (the ladder position) then becomes 1
+# and the second fight loads.
+# The fights themselves differ between the two sides (the fight RNG mixes in COP0 Count), so their
+# screenshots aren't compared; the CONTINUE-free path and the second fight's load are the point.
+ref_skip = ["fight_start", "stage2_start", "stage2_play"]
+steps = """
+WAIT_RAM 8000BBC1 8 == 7 1200   # the title
+WRITE_RAM 80048310 32 0x5EED     # pin seg0's RNG
+WRITE_RAM 80128230 32 0x08070901 # pin the arcade ladder: 8 7 9 1 4 0 3 6 2 5 10
+WRITE_RAM 80128234 32 0x04000306
+WRITE_RAM 80128238 32 0x02050A00 # ... and the position in it (8012823B = 0)
+WAIT 60
+PRESS START
+WAIT 120
+WRITE_RAM 80048310 32 0x5EED
+PRESS A                          # Jago
+WAIT_RAM 802D35AA 8 == 0x10 1800 # the fight is loaded
+WAIT 200
+SCREENSHOT fight_start
+WRITE_RAM 801D3614 8 1           # Orchid's health
+WRITE_RAM 801D3616 8 1
+REPEAT 42                        # ~95 s of attacks (one cycle = 136 VIs)
+PRESS DR 12                      # walk in
+WAIT 12
+PRESS A 4                        # punches, a kick
+WAIT 8
+PRESS B 4
+WAIT 8
+PRESS CL 4
+WAIT 8
+WRITE_RAM 801D3514 8 120         # Jago's health
+WRITE_RAM 801D3516 8 120
+PRESS DD 3                       # quarter circle forward + punch
+WAIT 3
+PRESS DD+DR 3
+WAIT 3
+PRESS DR+A 4
+WAIT 20
+PRESS DR 3                       # forward, down, down-forward + kick
+WAIT 3
+PRESS DD 3
+WAIT 3
+PRESS DD+DR+CD 4
+WAIT 20
+PRESS CU 4
+WAIT 8
+PRESS CR 4
+WAIT 8
+PRESS DR+B 4
+WAIT 10
+WRITE_RAM 801D3514 8 120
+WRITE_RAM 801D3516 8 120
+PRESS DL 3                       # back, forward + kick
+WAIT 3
+PRESS DR 3
+WAIT 3
+PRESS DR+CL 4
+WAIT 16
+END
+WAIT_RAM 8012823B 8 == 1 1800    # the win moved the ladder on
+WAIT_RAM 802D35AA 8 == 0x10 1800 # the second fight is loaded
+WAIT 200
+SCREENSHOT stage2_start
+DUMP_RAM stage2_start
+REPEAT 8                         # a little of the second fight
+PRESS A 4
+WAIT 8
+PRESS CL 4
+WAIT 8
+PRESS DD 3
+WAIT 3
+PRESS DD+DR 3
+WAIT 3
+PRESS DR+B 4
+WAIT 20
+END
+SCREENSHOT stage2_play
+"""

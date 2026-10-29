@@ -1,0 +1,79 @@
+description = "OPTIONS: walk every item, change the game settings, exit (saves them)"
+tier = "quick"
+seconds = 40
+pak = false
+# The title menu's cursor is 80127C40 (0 ARCADE ... 7 OPTIONS; it doesn't wrap). The OPTIONS screen has no
+# randomness, so its own steps are timed. Items, top to bottom: GAME SPEED, DIFFICULTY, TRAINING
+# DIFFICULTY, BUTTON SETUP, DEFAULT SETUP, GAME LOAD AND SAVE OPTIONS, MUSIC, RANDOM AFTER, TIME LIMIT,
+# THROWING, BLOOD, LEVEL 9 OPTIONS. DR changes a value; START leaves the screen.
+steps = """
+WAIT_RAM 8000BBC1 8 == 7 1200   # the title
+WAIT 120
+PRESS DD
+WAIT_RAM 80127C40 8 == 1 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 2 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 3 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 4 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 5 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 6 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 7 120
+WAIT 12
+PRESS START                      # OPTIONS
+WAIT 90
+SCREENSHOT options_top
+PRESS DR                         # GAME SPEED
+WAIT 20
+PRESS DD
+WAIT 20
+PRESS DR                         # DIFFICULTY
+WAIT 20
+PRESS DD
+WAIT 20
+PRESS DR                         # TRAINING DIFFICULTY
+WAIT 20
+SCREENSHOT options_changed
+PRESS DD
+WAIT 20
+PRESS DD
+WAIT 20
+PRESS DD
+WAIT 20
+PRESS DD                         # MUSIC
+WAIT 20
+PRESS DL
+WAIT 20
+PRESS DD                         # RANDOM AFTER
+WAIT 20
+PRESS DR
+WAIT 20
+PRESS DD                         # TIME LIMIT
+WAIT 20
+PRESS DR
+WAIT 20
+PRESS DD                         # THROWING
+WAIT 20
+PRESS DR
+WAIT 20
+PRESS DD                         # BLOOD
+WAIT 20
+PRESS DR
+WAIT 20
+PRESS DD                         # LEVEL 9 OPTIONS
+WAIT 20
+SCREENSHOT options_bottom
+PRESS START                      # back to the title
+WAIT_RAM 80127C40 8 == 7 300
+WAIT 60
+"""

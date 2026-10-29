@@ -1,0 +1,58 @@
+description = "TRAINING: pick a fighter and work through the move prompts"
+tier = "quick"
+seconds = 70
+pak = false
+# The title menu's cursor is 80127C40 (5 = TRAINING). Training shows a move list prompt (e.g. "Laser
+# Blade") with a countdown; the steps throw specials and normals at the training dummy.
+ref_ignore = [[0, 185, 320, 240]]
+ref_skip = ["training_versus", "training_play"]
+steps = """
+WAIT_RAM 8000BBC1 8 == 7 1200   # the title
+WRITE_RAM 80048310 32 0x5EED     # pin seg0's RNG
+WAIT 120
+PRESS DD
+WAIT_RAM 80127C40 8 == 1 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 2 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 3 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 4 120
+WAIT 12
+PRESS DD
+WAIT_RAM 80127C40 8 == 5 120
+WAIT 12
+PRESS START                      # TRAINING
+WAIT 90
+WRITE_RAM 80048310 32 0x5EED
+SCREENSHOT training_select
+PRESS A                          # Jago
+WAIT 120
+SCREENSHOT training_versus
+WAIT_RAM 802D35AA 8 == 0x10 1800 # loaded
+WAIT 200
+REPEAT 12
+PRESS DD 3                       # quarter circle back + punch (Laser Blade's motion), then others
+WAIT 3
+PRESS DD+DL 3
+WAIT 3
+PRESS DL+A 4
+WAIT 20
+PRESS DD 3
+WAIT 3
+PRESS DD+DR 3
+WAIT 3
+PRESS DR+A 4
+WAIT 20
+PRESS B 4
+WAIT 8
+PRESS CL 4
+WAIT 8
+PRESS DR 12
+WAIT 14
+END
+SCREENSHOT training_play
+"""

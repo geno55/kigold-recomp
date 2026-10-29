@@ -5,9 +5,9 @@
 // dump_all_threads() prints every thread's stack, for hangs (KIG_DUMP_AFTER=<seconds> runs it once).
 // The report also goes to logs/crash-<date>-<time>.txt, and a dialog points at it (unless
 // dialogs are off, as in --frames test runs). KIG_CRASH_AFTER=<seconds> crashes on purpose, for testing.
-// KIG_WRITE_WATCH=<hex N64 address>[,<max hits>] logs the native function (and its callers) of every
-// write to that RDRAM word (debugging: its 4 KB page is made read-only, and each write to the page is
-// single-stepped).
+// KIG_WRITE_WATCH=<hex N64 address>[,<max hits>[,<from script time>]] logs the native function (and its
+// callers) of every write to that RDRAM word, from that time on (debugging: its 4 KB page is made
+// read-only, and each write to the page is single-stepped).
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -220,6 +220,7 @@ namespace {
     uint8_t* watch_page = nullptr;
     uint8_t* watch_target = nullptr;
     int watch_hits_left = 0;
+    double watch_from = 0;  // script time hits start to count from
     thread_local bool watch_stepping = false;
     std::mutex watch_mutex;
 
@@ -241,7 +242,7 @@ namespace {
         // RDRAM words are host-order: the N64 word's 4 bytes are the 4 host bytes at the same aligned offset.
         if (target >= watch_target && target < watch_target + 4) {
             std::lock_guard lock{ watch_mutex };
-            if (watch_hits_left > 0) {
+            if (watch_hits_left > 0 && kig::input::script_time() >= watch_from) {
                 watch_hits_left--;
                 HANDLE process = GetCurrentProcess();
                 std::lock_guard sym_lock{ dbghelp_mutex };
@@ -250,6 +251,7 @@ namespace {
                              static_cast<uint32_t>(watch_target - rdram_base + 0x80000000ULL));
                 describe_address(stderr, process, reinterpret_cast<uint64_t>(rec->ExceptionAddress));
                 walk_stack(stderr, process, GetCurrentThread(), *info->ContextRecord, 6);
+                kig::trace::dump_current_thread(stderr);  // trace builds with KIG_TRACE=1: the calls leading here
             }
         }
         DWORD old;
@@ -266,6 +268,8 @@ static void arm_write_watch() {
     const uint32_t addr = static_cast<uint32_t>(std::strtoul(spec, nullptr, 16)) & ~3u;
     const char* comma = std::strchr(spec, ',');
     watch_hits_left = comma ? std::atoi(comma + 1) : 50;
+    const char* comma2 = comma ? std::strchr(comma + 1, ',') : nullptr;
+    watch_from = comma2 ? std::atof(comma2 + 1) : 0.0;
     watch_target = rdram_base + (addr - 0x80000000u);
     watch_page = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(watch_target) & ~uintptr_t{ 0xFFF });
     AddVectoredExceptionHandler(1, write_watch_handler);

@@ -224,10 +224,6 @@ kig::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::W
 
 kig::renderer::RT64Context::~RT64Context() = default;
 
-// The viewport the last gfx task ended with (see send_dl).
-static interop::RSPViewport last_viewport{};
-static bool has_last_viewport = false;
-
 void kig::renderer::RT64Context::send_dl(const OSTask* task) {
     kig::stats::display_lists++;
     kig::stats::summarize_dl(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF);
@@ -242,18 +238,8 @@ void kig::renderer::RT64Context::send_dl(const OSTask* task) {
     flush_rdp_lists(true);
     RT64::RSP& rsp = *app->state->rsp;
     rsp.reset();
-    // F3D keeps the viewport in DMEM, which the next task's ucode data load doesn't cover, so on hardware a
-    // task that sets no viewport draws with the previous task's. KI Gold relies on it: near the end of the
-    // victory pose it turns its viewport G_MOVEMEM into a no-op, and RT64's reset (all-zero viewport) then
-    // collapsed the whole stage to a point, leaving a black floor.
-    if (has_last_viewport) {
-        rsp.viewportStack[0] = last_viewport;
-        rsp.viewportChanged = true;
-    }
     app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
     app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);
-    last_viewport = rsp.viewportStack[rsp.viewportStackSize - 1];
-    has_last_viewport = true;
     wait_for_rdram_writeback();
 }
 

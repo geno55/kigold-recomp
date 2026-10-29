@@ -1,0 +1,49 @@
+description = "Two players: player 2 joins at character select, both pick, player 1 attacks"
+tier = "quick"
+seconds = 90
+pak = false
+# START on port 2 at the character select joins player 2. The fight's RNG mixes in COP0 Count, so the
+# fight screenshots aren't compared; the select screen is (minus its random fire, as in char_select).
+ref_ignore = [[0, 185, 320, 240]]
+ref_skip = ["versus", "fight_start", "fight_play"]
+steps = """
+WAIT_RAM 8000BBC1 8 == 7 1200   # the title
+WRITE_RAM 80048310 32 0x5EED     # pin seg0's RNG
+WAIT 60
+PRESS START
+WAIT 60
+PRESS 2>START                    # player 2 joins
+WAIT 60
+SCREENSHOT select_2p
+PRESS 2>DL                       # player 2 moves off the default fighter
+WAIT 30
+PRESS A                          # player 1: Jago
+WAIT 10
+PRESS 2>A                        # player 2
+WAIT 100
+SCREENSHOT versus
+WAIT_RAM 802D35AA 8 == 0x10 1800 # the fight is loaded
+WAIT 200
+SCREENSHOT fight_start
+REPEAT 10                        # player 1 attacks, player 2 blocks now and then
+PRESS DR 12
+WAIT 12
+PRESS A 4
+WAIT 8
+PRESS B 4
+WAIT 8
+PRESS 2>DR 20                    # (player 2 faces left: holding away blocks)
+PRESS DD 3
+WAIT 3
+PRESS DD+DR 3
+WAIT 3
+PRESS DR+A 4
+WAIT 20
+PRESS CU 4
+WAIT 8
+PRESS DR+CL 4
+WAIT 16
+END
+SCREENSHOT fight_play
+DUMP_RAM fight_play
+"""

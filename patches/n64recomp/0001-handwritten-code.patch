@@ -76,7 +76,7 @@ index 94f85c5..b1cae22 100644
          case InstrId::cpu_ddivu:
              fmt::print(output_file, "DDIVU(U64({}), U64({}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
 diff --git a/src/recompilation.cpp b/src/recompilation.cpp
-index c228433..10e00da 100644
+index c228433..1e08b3a 100644
 --- a/src/recompilation.cpp
 +++ b/src/recompilation.cpp
 @@ -423,6 +423,11 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
@@ -91,7 +91,30 @@ index c228433..10e00da 100644
              default:
                  fmt::print(stderr, "Unhandled cop0 register in mfc0: {}\n", (int)reg);
                  return false;
-@@ -547,7 +552,11 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+@@ -473,6 +478,11 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+         break;
+     // Branches
+     case InstrId::cpu_jal:
++        // Set $ra as the hardware does (before the delay slot): calls are C calls, but code that reads $ra as
++        // data (saves it, then restores another register from a reused stack slot, say) must see the real
++        // return address rather than whatever $ra last held.
++        print_indent();
++        fmt::print(output_file, "ctx->r31 = (gpr)(int32_t)0x{:08X}u;\n", instr_vram + 8);
+         if (!print_func_call_by_address(instr.getBranchVramGeneric())) {
+             return false;
+         }
+@@ -484,6 +494,10 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+             return false;
+         }
+         needs_link_branch = true;
++        if (rs != (int)rabbitizer::Registers::Cpu::GprO32::GPR_O32_ra) {  // (jalr $ra reads the old $ra as its target)
++            print_indent();
++            fmt::print(output_file, "ctx->r31 = (gpr)(int32_t)0x{:08X}u;\n", instr_vram + 8);  // see jal
++        }
+         print_func_call_by_register(rs);
+         break;
+     case InstrId::cpu_j:
+@@ -547,7 +561,11 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
                  }
                  print_indent();
                  print_indent();
@@ -104,7 +127,7 @@ index c228433..10e00da 100644
                  print_indent();
                  generator.emit_switch_close();
                  break;
-@@ -832,9 +841,13 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+@@ -832,9 +850,13 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
              if (in_likely_delay_slot) {
                  generator.emit_goto(fmt::format("skip_{}", num_likely_branches));
              }
@@ -121,7 +144,7 @@ index c228433..10e00da 100644
                  ++cur_label;
              }
  
-@@ -864,6 +877,50 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+@@ -864,6 +886,50 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
              // Advance the vram address by the size of one instruction
              vram += 4;
          }

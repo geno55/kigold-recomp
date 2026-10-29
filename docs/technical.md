@@ -23,11 +23,20 @@ Changes to the runtime are in `patches/runtime/` (applied at configure time). Th
 - 0010: synchronous gfx submission (the title fire texture was read mid-update)
 - 0011: keep RDRAM allocated at exit (crash on quit)
 
-The N64Recomp changes (handwritten code, VR4300 divide by zero, Count reads, branch labels) are in `patches/n64recomp/`.
+The N64Recomp changes (handwritten code, VR4300 divide by zero, Count reads, branch labels, `$ra` on
+calls) are in `patches/n64recomp/`.
 Upstream emitted at most one label per instruction, so a branch target outside a function (below its
 start) pushed every later label one instruction late. The fight's entity loop then skipped reloading
 each slot's type, and every slot after the first empty one stopped updating: blood, hit sparks and
 fireballs froze in place.
+
+Upstream also compiled `jal`/`jalr` to plain C calls without setting `$ra`, so code that saves `$ra`
+saved whatever an earlier return left there. The fight's per-frame routine can exit early and later
+restore `$fp` from a stack slot that seg0's drawing code had reused for its saved `$ra`; the game then
+stores through `$fp`. On hardware that slot holds a return address into code, and the stray store
+changes nothing visible. Here it held the stale 0x800495A0, the static viewport display list, which the
+store blanked for good: the stage vanished late in the victory pose (a black floor), and in the next
+fight the fireplace flames were drawn beside the fireplace. Calls now set `$ra` as the hardware does.
 
 RT64 gets one patch (`patches/rt64/`, also applied at configure time) for raw RDP triangles. They are
 drawn as the two trapezoids the RDP fills, not as one triangle, which matters because the fight sky is
@@ -37,10 +46,7 @@ CPU-built floors. On the renderer side (`src/main/rt64_render_context.cpp`):
 - frames are presented as the VI scans them out (RT64's Console mode), not a frame early;
 - the CPU-built RDP list and the frame's gfx task form one RT64 frame;
 - the DP interrupt waits until RT64 has written the frame back to RDRAM, because KI Gold reads its
-  framebuffers with the CPU;
-- the viewport carries over from one gfx task to the next, as it does in the RSP's DMEM. Near the end of
-  the victory pose KI Gold stops loading its viewport; RT64's per-task reset (an all-zero viewport) then
-  made the whole stage vanish, leaving a black floor.
+  framebuffers with the CPU.
 
 ## Build pipeline
 
