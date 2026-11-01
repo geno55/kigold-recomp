@@ -12,7 +12,7 @@ After recompiling it writes include/kig_skipped.h: declarations for the skipped 
 code calls that funcs.h doesn't declare (N64Recomp declares reimplemented functions only). Each must be
 an N64Recomp-skipped function; anything else is an error.
 
-Usage: python tools/gen_config.py [--trace] [--no-run] [--no-check]
+Usage: python tools/gen_config.py [--trace] [--no-run] [--no-check] [--n64recomp PATH]
   --trace     enable N64Recomp trace_mode (adds trace.h calls to every function); writes
               kig.us.trace.toml -> RecompiledFuncsTrace/ instead of the normal config/output
   --no-run    only write the config
@@ -182,12 +182,12 @@ stubs = []
     CONFIG.write_text(text, encoding="utf-8")
 
 
-def run_recompiler() -> int:
+def run_recompiler(recompiler_path: Path) -> int:
     out = ROOT / OUTPUT_DIR
     if out.exists():
         for f in out.glob("*"):
             f.unlink()
-    r = subprocess.run([str(ROOT / ("lib/N64Recomp/build/N64Recomp.exe" if sys.platform == "win32" else "lib/N64Recomp/build-linux/N64Recomp")), CONFIG.name], cwd=ROOT,
+    r = subprocess.run([str(recompiler_path), CONFIG.name], cwd=ROOT,
                        capture_output=True, text=True)
     log = r.stdout + r.stderr
     (ROOT / "build").mkdir(exist_ok=True)
@@ -269,6 +269,13 @@ def main() -> int:
     ap.add_argument("--trace", action="store_true")
     ap.add_argument("--no-run", action="store_true")
     ap.add_argument("--no-check", action="store_true")
+    ap.add_argument(
+        "--n64recomp",
+        type=Path,
+        default=ROOT / "lib/N64Recomp/build" /
+                ("N64Recomp.exe" if sys.platform == "win32" else "N64Recomp"),
+        help="Path to the N64Recomp executable",
+    )
     args = ap.parse_args()
     if args.trace:
         global CONFIG, OUTPUT_DIR
@@ -280,7 +287,7 @@ def main() -> int:
     print(f"wrote {CONFIG.name}")
     if args.no_run:
         return 0
-    if run_recompiler() or write_decls():
+    if run_recompiler(args.n64recomp) or write_decls():
         return 1
     if args.no_check or args.trace:  # trace builds use include/trace.h instead
         return 0
