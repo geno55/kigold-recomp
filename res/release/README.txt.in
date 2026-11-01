@@ -1,11 +1,11 @@
 Killer Instinct Gold: Recompiled  v@VERSION@
-https://github.com/geno55/kig-recomp
+https://github.com/geno55/kigold-recomp
 
 A native Windows port of Killer Instinct Gold (N64), made by static recompilation with
 N64Recomp, N64ModernRuntime and RT64. Unofficial fan project.
 
-NO GAME DATA IS INCLUDED. You need your own ROM of the USA V1.0 release
-(sha1 400aa84811f1f2f6c62c756b43b54d534d5a5ec8 as .z64; .v64 and .n64 dumps work too).
+NO ROM IS INCLUDED. You need your own copy of the game: a ROM of the USA Rev 2 (v1.2) release
+(sha1 aaeb492b1e538af65a3544a97240675ef438a04f as .z64; .v64 and .n64 dumps work too).
 
 REQUIREMENTS
   Windows 10 or 11 (64-bit), a GPU with Direct3D 12 or Vulkan.
@@ -43,6 +43,7 @@ SETTINGS AND SAVES  (%APPDATA%\KIGRecomp)
                  lefty- lefty+ rightx- rightx+ righty- righty+)
   sound.json     master_volume (0-100), mute_when_unfocused (true/false)
   window.json    window size and position (remembered automatically)
+  saves\kig.us.bin               the game's EEPROM save
   saves\controllerpak_port<N>\   Controller Pak saves
   logs\kig.log  log of the last run (the two before it are kept as kig.1.log and kig.2.log);
                  crash reports are saved next to it as crash-<date>-<time>.txt
@@ -51,13 +52,14 @@ SETTINGS AND SAVES  (%APPDATA%\KIGRecomp)
   kig.exe --console also shows the log in a console window.
 
 KNOWN LIMITATIONS
-  - A correctness pass is in progress; report problems on GitHub (attach the log or crash report).
+  - This is an early release. Not every character and stage has been checked; report problems on
+    GitHub (attach the log or crash report).
   - Widescreen and high frame rate are not supported yet.
 
 LICENSE
   GPL-3.0 (LICENSE.txt). kig.exe contains this project's code (GPL-3.0), N64ModernRuntime (GPL-3.0) and
   other open-source libraries; see THIRD-PARTY-NOTICES.txt.
-  Source: https://github.com/geno55/kig-recomp (tag v@VERSION@).
+  Source: https://github.com/geno55/kigold-recomp (tag v@VERSION@).
 
 kig.pdb lets crash reports name the function that crashed; keep it next to kig.exe.
 The msvcp140/vcruntime140 DLLs are the Microsoft Visual C++ runtime, included so no separate install is needed.

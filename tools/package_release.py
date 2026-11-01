@@ -1,7 +1,7 @@
-"""Release package: build/release/kig-recomp-v<version>-windows-x64.zip from a Release build.
+"""Release package: build/release/kigold-recomp-v<version>-windows-x64.zip from a Release build.
 
 The version comes from project(... VERSION x.y.z) in CMakeLists.txt. The zip holds one folder,
-kig-recomp-v<version>/, with:
+kigold-recomp-v<version>/, with:
   kig.exe, kig.pdb, SDL2.dll, dxil.dll, dxcompiler.dll   from the build directory
   msvcp140*.dll, vcruntime140*.dll                         Visual C++ runtime (VS redist folder)
   README.txt, THIRD-PARTY-NOTICES.txt                      res/release/*.txt.in with @VERSION@ filled in
@@ -82,7 +82,7 @@ def main() -> int:
              for name in TEMPLATES}
     texts["LICENSE.txt"] = (ROOT / "LICENSE").read_text(encoding="utf-8")
 
-    folder = f"kig-recomp-{tag}"
+    folder = f"kigold-recomp-{tag}"
     out = ROOT / "build" / "release" / f"{folder}-windows-x64.zip"
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
