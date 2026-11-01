@@ -21,6 +21,7 @@
 #define SDL_MAIN_HANDLED
 #include "SDL.h"
 #include "SDL_syswm.h"
+#include "kig_linux_compat.h"
 #include "nfd.h"
 
 #ifdef _WIN32

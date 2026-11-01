@@ -1,4 +1,5 @@
-﻿cmake_minimum_required(VERSION 3.20)
+
+cmake_minimum_required(VERSION 3.20)
 project(KIGRecomp VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 17)
@@ -21,19 +22,25 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 #     upstream 589bbf0 + the Controller Pak implementation (N64ModernRuntime PR #139 lineage),
 #     which provides osPfsInit/osPfsInitPak etc. Pins N64Recomp 81213c1.
 #   lib/rt64: renderer (static, SDL window for Vulkan, CPU-side HLSL helpers).
-#   SDL2: official VC development package via FetchContent.
+#   SDL2: official VC development package via FetchContent on Windows;
+#         system-installed SDL2 on Linux.
 # ---------------------------------------------------------------------------------------------
 set(RT64_STATIC TRUE)
 set(RT64_SDL_WINDOW_VULKAN TRUE)
 add_compile_definitions(HLSL_CPU)
 
-include(FetchContent)
-set(SDL2_VERSION "2.30.3" CACHE STRING "SDL2 version to fetch")
-FetchContent_Declare(sdl2
-    URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip)
-FetchContent_MakeAvailable(sdl2)
-include_directories(${sdl2_SOURCE_DIR}/include)
-link_directories(${sdl2_SOURCE_DIR}/lib/x64)
+if(WIN32)
+    include(FetchContent)
+    set(SDL2_VERSION "2.30.3" CACHE STRING "SDL2 version to fetch")
+    FetchContent_Declare(sdl2
+        URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip)
+    FetchContent_MakeAvailable(sdl2)
+    include_directories(${sdl2_SOURCE_DIR}/include)
+    link_directories(${sdl2_SOURCE_DIR}/lib/x64)
+else()
+    find_package(SDL2 REQUIRED)
+    find_package(Threads REQUIRED)
+endif()
 
 # This project's changes to the runtime (patches/runtime/, applied in file-name order). A hash of the patch
 # set is kept in the submodule's git directory; when it differs (first configure, or patches added or
@@ -41,6 +48,7 @@ link_directories(${sdl2_SOURCE_DIR}/lib/x64)
 # applied again. Later patches can change lines earlier ones added, so each step applies for real (git
 # apply doesn't chain several patches to one file in a single check).
 find_package(Git REQUIRED)
+
 # apply_patch_set(<submodule dir> <patch dir>): the mechanism above, for one submodule.
 function(apply_patch_set target_dir patch_dir)
     file(GLOB patches ${patch_dir}/*.patch)
@@ -84,6 +92,7 @@ function(apply_patch_set target_dir patch_dir)
 endfunction()
 
 apply_patch_set(${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime ${CMAKE_SOURCE_DIR}/patches/runtime)
+
 # RT64: raw RDP triangles drawn as the RDP fills them, and clipped (KI Gold's CPU-built floors and sky).
 apply_patch_set(${CMAKE_SOURCE_DIR}/lib/rt64 ${CMAKE_SOURCE_DIR}/patches/rt64)
 
@@ -92,8 +101,22 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime ${CMAKE_BINARY_DIR}/N6
 
 # Recompiler tools (built from lib/N64Recomp @ ffb39cd; the runtime pins 81213c1, whose include/ and
 # code generator are identical).
-set(N64RECOMP_EXE "${CMAKE_SOURCE_DIR}/lib/N64Recomp/build/N64Recomp.exe" CACHE FILEPATH "N64Recomp executable")
-set(RSPRECOMP_EXE "${CMAKE_SOURCE_DIR}/lib/N64Recomp/build/RSPRecomp.exe" CACHE FILEPATH "RSPRecomp executable")
+# Default to the same build directory on every platform, with native executable extensions.
+# Override either cache path if the tools were built elsewhere.
+if(WIN32)
+    set(RECOMP_EXE_SUFFIX ".exe")
+else()
+    set(RECOMP_EXE_SUFFIX "")
+endif()
+
+set(N64RECOMP_EXE
+    "${CMAKE_SOURCE_DIR}/lib/N64Recomp/build/N64Recomp${RECOMP_EXE_SUFFIX}"
+    CACHE FILEPATH "N64Recomp executable")
+
+set(RSPRECOMP_EXE
+    "${CMAKE_SOURCE_DIR}/lib/N64Recomp/build/RSPRecomp${RECOMP_EXE_SUFFIX}"
+    CACHE FILEPATH "RSPRecomp executable")
+
 set(BASEROM "${CMAKE_SOURCE_DIR}/baserom.us.z64")
 
 # ---------------------------------------------------------------------------------------------
@@ -105,6 +128,7 @@ set(BASEROM "${CMAKE_SOURCE_DIR}/baserom.us.z64")
 # (include/trace.h), which records per-function coverage and the per-thread trace ring.
 option(KIG_TRACE "Build the trace/coverage variant of the recompiled code" OFF)
 option(KIG_CONSOLE "Build kig.exe as a console program (development; the default is a GUI program)" OFF)
+
 if(KIG_TRACE)
     set(RECOMP_DIR ${CMAKE_SOURCE_DIR}/RecompiledFuncsTrace)
     set(GEN_CONFIG_ARGS --trace)
@@ -116,6 +140,7 @@ endif()
 add_custom_command(
     OUTPUT ${RECOMP_DIR}/funcs.h ${CMAKE_SOURCE_DIR}/include/kig_skipped.h
     COMMAND ${Python3_EXECUTABLE} tools/gen_config.py ${GEN_CONFIG_ARGS}
+            --n64recomp "${N64RECOMP_EXE}"
     DEPENDS ${CMAKE_SOURCE_DIR}/syms/kig.us.syms.toml
             ${CMAKE_SOURCE_DIR}/syms/dead_ignore.txt
             ${CMAKE_SOURCE_DIR}/syms/overrides.toml
@@ -147,13 +172,18 @@ add_custom_target(GenerateRecompiled DEPENDS
 # On a clean tree, generate once at configure time so the glob below sees the real file list.
 if(NOT EXISTS ${RECOMP_DIR}/funcs.h)
     message(STATUS "${RECOMP_DIR} missing: running tools/gen_config.py ${GEN_CONFIG_ARGS}")
-    execute_process(COMMAND ${Python3_EXECUTABLE} tools/gen_config.py ${GEN_CONFIG_ARGS}
-                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} RESULT_VARIABLE GEN_RESULT)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} tools/gen_config.py ${GEN_CONFIG_ARGS}
+                --n64recomp "${N64RECOMP_EXE}"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        RESULT_VARIABLE GEN_RESULT)
     if(NOT GEN_RESULT EQUAL 0)
         message(FATAL_ERROR "tools/gen_config.py failed")
     endif()
 endif()
+
 file(GLOB FUNC_C_SOURCES CONFIGURE_DEPENDS ${RECOMP_DIR}/*.c)
+
 # lookup.cpp: get_entrypoint_address()/get_rom_name(). recomp_overlays.inl (the section/function
 # table) is not compiled here; the runtime glue includes it (src/main/register_overlays.cpp).
 file(GLOB FUNC_CXX_SOURCES CONFIGURE_DEPENDS ${RECOMP_DIR}/*.cpp)
@@ -177,7 +207,7 @@ set_source_files_properties(${FUNC_C_SOURCES} PROPERTIES COMPILE_OPTIONS
 # -Wno-shift-op-parentheses: librecomp's rsp_vu_impl.hpp writes `result >> 31 - shift`, which is the
 # intended (31 - shift) grouping; the warning is in the runtime header, not generated code.
 set_source_files_properties(${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp PROPERTIES COMPILE_OPTIONS
-    "/clang:-march=nehalem;-Wno-unused-variable;-Wno-unused-label;-Wno-unused-but-set-variable;-Wno-shift-op-parentheses")
+    "$<$<BOOL:${WIN32}>:/clang:-march=nehalem>$<$<NOT:$<BOOL:${WIN32}>>:-march=nehalem>;-Wno-unused-variable;-Wno-unused-label;-Wno-unused-but-set-variable;-Wno-shift-op-parentheses")
 
 # Icon and version resource; res/kig.ico comes from tools/make_icon.py.
 set(KIG_RES_DIR ${CMAKE_SOURCE_DIR}/res)
@@ -224,27 +254,43 @@ target_include_directories(kig PRIVATE
 # IMGUI_IMPL_VULKAN_NO_PROTOTYPES: as RT64 builds ImGui's Vulkan backend (volk loads the functions).
 target_compile_definitions(kig PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS KIG_VERSION="${PROJECT_VERSION}"
                            IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
+
 # nfd (nativefiledialog-extended, built by RT64): the launcher's ROM picker. plume (RT64's graphics
 # layer) and RT64's ImGui: the launcher and settings menu (src/main/ui_render.cpp).
-target_link_libraries(kig PRIVATE KIGRecompiled librecomp ultramodern rt64 plume nfd SDL2 Winmm.lib Dbghelp.lib)
+target_link_libraries(kig PRIVATE
+    KIGRecompiled librecomp ultramodern rt64 plume nfd
+)
 
-# Identical code folding would merge distinct recompiled functions (Zelda64Recomp does the same).
-target_link_options(kig PRIVATE /OPT:NOICF)
-# Release builds still get a PDB (public symbols for every function, full debug info for our own
-# sources) so the crash handler can name recompiled functions. /DEBUG defaults to /OPT:NOREF; keep REF.
-target_compile_options(kig PRIVATE /Z7)
-target_link_options(kig PRIVATE /DEBUG /OPT:REF)
-# GUI program by default: no console window; output goes to logs/kig.log (src/main/log.cpp),
-# and --console shows it in a console. mainCRTStartup keeps main() as the entry point.
-if(KIG_CONSOLE)
-    set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+if(WIN32)
+    target_link_libraries(kig PRIVATE SDL2 Winmm.lib Dbghelp.lib)
+
+    # Identical code folding would merge distinct recompiled functions (Zelda64Recomp does the same).
+    target_link_options(kig PRIVATE /OPT:NOICF)
+    # Release builds still get a PDB (public symbols for every function, full debug info for our own
+    # sources) so the crash handler can name recompiled functions. /DEBUG defaults to /OPT:NOREF; keep REF.
+    target_compile_options(kig PRIVATE /Z7)
+    target_link_options(kig PRIVATE /DEBUG /OPT:REF)
+    # GUI program by default: no console window; output goes to logs/kig.log (src/main/log.cpp),
+    # and --console shows it in a console. mainCRTStartup keeps main() as the entry point.
+    if(KIG_CONSOLE)
+        set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    else()
+        set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+    endif()
+
+    add_custom_command(TARGET kig POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${sdl2_SOURCE_DIR}/lib/x64/SDL2.dll"
+            "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxil.dll"
+            "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
+            $<TARGET_FILE_DIR:kig>)
 else()
-    set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
-endif()
+    # Request an SDL window explicitly compatible with Vulkan.
+    target_compile_definitions(kig PRIVATE RT64_SDL_WINDOW_VULKAN)
 
-add_custom_command(TARGET kig POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${sdl2_SOURCE_DIR}/lib/x64/SDL2.dll"
-        "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxil.dll"
-        "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
-        $<TARGET_FILE_DIR:kig>)
+    target_link_libraries(kig PRIVATE
+        SDL2::SDL2
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+    )
+endif()

@@ -26,3 +26,6 @@ kig.us.trace.toml
 # Per-phase planning/status notes stay local
 docs/phase*.md
 local_paths.toml
+
+.venv/
+splat/kig.local.yaml

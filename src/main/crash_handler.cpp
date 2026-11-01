@@ -341,6 +341,6 @@ void kig::crash::install() {
 #else
 static void arm_write_watch() {}
 void kig::crash::install() {}
-void kig::crash::set_dialogs(bool) {}
+
 void kig::crash::dump_all_threads(FILE*) {}
 #endif
