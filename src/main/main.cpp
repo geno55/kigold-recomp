@@ -652,5 +652,10 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     timeEndPeriod(1);
 #endif
-    return kig::steps::exit_code();
+    // Game threads can still be running recompiled code (see patch 0011), so returning from main would
+    // destroy the runtime's globals under them and crash on quit.
+    const int exit_code = kig::steps::exit_code();
+    std::fflush(nullptr);
+    kig::log::flush();
+    std::_Exit(exit_code);
 }

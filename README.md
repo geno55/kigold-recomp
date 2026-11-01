@@ -97,15 +97,6 @@ The Linux symbol workflow uses `tools/regen_syms_linux.py` in place of the Power
 
 ### Linux troubleshooting and known issues
 
-**Wayland shutdown SIGSEGV:** With CachyOS KDE Wayland,
-`sdl2-compat 2.32.74-1.1`, and an RTX 5080, closing the game window
-can result in `SIGSEGV` (exit status 139). Vulkan, sound, ROM loading
-and gameplay startup are successful. An X11/XWayland run exited normally;
-two Wayland runs under GDB also exited normally, so no reliable backtrace
-has been captured. Cause unconfirmed; it may be timing or backend specific.
-As a temporary workaround, run `env SDL_VIDEODRIVER=x11 ./build/cmake-linux/kig`.
-This is being tracked separately from native Linux compilation support.
-
 **Other limitations:** Other Linux distributions have not been tested
 in this PR, and AppImage packaging is not automated.
 

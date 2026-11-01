@@ -175,14 +175,6 @@ From the project directory:
 
 Choose your ROM if prompted. Initial window setup should report a Vulkan backend if your graphics drivers are working.
 
-**Known issue:** On the tested CachyOS/Wayland setup, closing the window can trigger a segmentation fault **during shutdown**, even though gameplay runs. An X11/XWayland run exited cleanly. If you encounter this, try:
-
-```sh
-env SDL_VIDEODRIVER=x11 ./build/cmake-linux/kig
-```
-
-This changes only the SDL video backend for that launch.
-
 ## Common problems
 
 | Symptom | First thing to check |
@@ -192,7 +184,6 @@ This changes only the SDL video backend for that launch.
 | `baserom.us.z64` missing or wrong SHA-1 | Check location, filename, and exact ROM revision in step 3. |
 | `N64Recomp` or `RSPRecomp` missing | Recheck step 5, especially the tool build output. |
 | `SDL_Vulkan_CreateSurface` fails | Ensure you built the current `main` branch, have a working Vulkan driver, and did not disable the Linux `RT64_SDL_WINDOW_VULKAN` compile definition. |
-| Wayland SIGSEGV when closing | Use the X11 launch command from step 8; see the README's Linux known issues. |
 
 ## Rebuilding after you change code
 
