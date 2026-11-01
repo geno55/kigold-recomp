@@ -1,4 +1,7 @@
-// Library function names (tools/kig_libsyms.py). splat symbol_addrs format.
+// Library function names, kept by hand. splat symbol_addrs format.
+// exact: the instruction sequence matched one libultra function in W.G. 3D Hockey: Recompiled (same SDK, same compiler).
+// manual: identified by hand, for the reason on the line above it. Mostly tiny functions with the same instruction
+// shape as several library functions, told apart by the register or address they use.
 osInitialize = 0x80002590; // type:func segment:boot exact
 osCreateThread = 0x800027C0; // type:func segment:boot exact
 osStartThread = 0x80002910; // type:func segment:boot exact

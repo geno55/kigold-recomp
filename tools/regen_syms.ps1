@@ -1,5 +1,5 @@
 # Rebuilds the symbol pipeline end to end and runs N64Recomp:
-#   build_recomp_rom -> splat -> export_splat -> kig_funcs -> kig_libsyms -> gen_syms -> gen_config
+#   build_recomp_rom -> splat -> export_splat -> kig_funcs -> gen_syms -> gen_config
 # Usage (from the repo root, PowerShell): tools\regen_syms.ps1 [-NoSplat] [-Check]
 param([switch]$NoSplat, [switch]$Check)
 $ErrorActionPreference = "Stop"
@@ -12,7 +12,6 @@ if (-not $NoSplat) {
 python tools\export_splat.py | Select-Object -First 4
 python tools\kig_funcs.py
 if ($LASTEXITCODE) { exit 1 }
-python tools\kig_libsyms.py
 python tools\gen_syms.py
 if ($LASTEXITCODE) { exit 1 }
 if ($Check) { python tools\gen_config.py } else { python tools\gen_config.py --no-check }

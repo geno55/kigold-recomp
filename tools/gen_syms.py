@@ -1,6 +1,6 @@
 """Write the N64Recomp symbols file (syms/kig.us.syms.toml) from the function list and library names.
 
-Inputs:  build/kig_funcs.csv (tools/kig_funcs.py), syms/libultra_symbols.txt (tools/kig_libsyms.py),
+Inputs:  build/kig_funcs.csv (tools/kig_funcs.py), syms/libultra_symbols.txt (kept by hand),
          syms/overrides.toml ([[rename]] section/vram/name/reason)
 Output:  syms/kig.us.syms.toml: one [[section]] per code section (tools/kig_layout.py), with `rom`
          pointing into build/kig.recomp.z64.

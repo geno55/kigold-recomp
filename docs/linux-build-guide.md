@@ -137,7 +137,7 @@ Successful output includes messages similar to:
 N64Recomp exit 0; Function count: 1919; 36 C files in RecompiledFuncs/
 ```
 
-**Why a special Linux script?** `tools/regen_syms.ps1` needs PowerShell; this script runs the same steps. It reuses checked-in library names; rebuilding the underlying library-name source itself requires a separate W.G. 3D Hockey reference project, which is **not** required for the normal Linux build.
+**Why a special Linux script?** `tools/regen_syms.ps1` needs PowerShell; this script runs the same steps.
 
 Some analysis warnings can appear, including a long `PROBLEMS:` list from `tools/export_splat.py`, which is expected. A Python traceback or a nonzero exit from the script, however, indicates failure; resolve that before building the game.
 

@@ -55,11 +55,10 @@ CPU-built floors. On the renderer side (`src/main/rt64_render_context.cpp`):
 | Inflate the code segments, append them to a copy of the ROM | `tools/build_recomp_rom.py` | `build/kig.recomp.z64` |
 | Disassemble (analysis only) | `python -m splat split splat/kig.us.yaml` | `build/splat/` |
 | Function starts and sizes | `tools/export_splat.py`, `tools/kig_funcs.py` | `build/splat_funcs.csv`, `build/kig_funcs.csv` |
-| Library names (matched against wg3d's libultra 2.0D) | `tools/kig_libsyms.py` | `syms/libultra_symbols.txt` |
 | N64Recomp symbols | `tools/gen_syms.py` | `syms/kig.us.syms.toml` |
 | Config, recompile, skipped-function declarations | `tools/gen_config.py` | `kig.us.toml`, `RecompiledFuncs/`, `include/kig_skipped.h`, `include/kig_segments.h` |
 
-Hand decisions live in `syms/overrides.toml`, `syms/libnames_manual.toml` and `syms/dead_ignore.txt`.
+Hand decisions live in `syms/overrides.toml`, `syms/libultra_symbols.txt` and `syms/dead_ignore.txt`.
 
 ## Command-line options
 

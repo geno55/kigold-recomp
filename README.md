@@ -92,8 +92,7 @@ The generator uses native `N64Recomp` and `RSPRecomp` binaries from `lib/N64Reco
 you can override their paths with CMake's `N64RECOMP_EXE` and `RSPRECOMP_EXE` cache entries.
 
 The Linux symbol workflow uses `tools/regen_syms_linux.py` in place of the PowerShell-only
-`tools/regen_syms.ps1`. It uses the checked-in library symbol names and does **not** rerun
-`tools/kig_libsyms.py`, which additionally requires W.G. 3D Hockey reference files.
+`tools/regen_syms.ps1`.
 
 ### Linux troubleshooting and known issues
 

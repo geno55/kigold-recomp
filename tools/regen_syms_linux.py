@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Linux counterpart of tools/regen_syms.ps1: rebuilds the symbols and runs N64Recomp.
-
-Uses the checked-in syms/libultra_symbols.txt. Regenerating that file requires the separate
-W.G. 3D Hockey reference project (tools/kig_libsyms.py).
-"""
+"""Linux counterpart of tools/regen_syms.ps1: rebuilds the symbols and runs N64Recomp."""
 from pathlib import Path
 import subprocess
 import sys
