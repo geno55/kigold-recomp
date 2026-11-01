@@ -1,6 +1,6 @@
 @echo off
 rem Usage: tools\cmake_build.bat <target...>   (configures build/cmake with Ninja + clang-cl, Release)
-rem KIG_BUILD_DIR overrides the build directory (tools/verify_recompile.py uses build/cmake-verify).
+rem KIG_BUILD_DIR overrides the build directory.
 rem KIG_CMAKE_ARGS adds configure arguments, e.g. the trace/coverage build:
 rem   set KIG_BUILD_DIR=build/cmake-trace & set KIG_CMAKE_ARGS=-DKIG_TRACE=ON & tools\cmake_build.bat kig
 if "%1"=="" (echo usage: cmake_build.bat target & exit /b 2)

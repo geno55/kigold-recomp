@@ -117,7 +117,7 @@ ERROR_PATTERNS = re.compile(r"CRASH|Failed to find function|exited unexpectedly|
 
 
 # ---------------------------------------------------------------------------------------------
-# Image comparison (same metric as tools/verify_boot.py)
+# Image comparison
 # ---------------------------------------------------------------------------------------------
 def thumb(path, size=(64, 48)):
     a = np.asarray(Image.open(path).convert("L").resize(size, Image.BILINEAR), dtype=np.float64)
