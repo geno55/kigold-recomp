@@ -17,6 +17,7 @@
 
 #include "SDL.h"
 #include "SDL_syswm.h"
+#include "kig_linux_compat.h"
 
 #include "librecomp/config.hpp"
 #include "ultramodern/config.hpp"

@@ -187,7 +187,7 @@ def run_recompiler() -> int:
     if out.exists():
         for f in out.glob("*"):
             f.unlink()
-    r = subprocess.run([str(ROOT / "lib/N64Recomp/build/N64Recomp.exe"), CONFIG.name], cwd=ROOT,
+    r = subprocess.run([str(ROOT / ("lib/N64Recomp/build/N64Recomp.exe" if sys.platform == "win32" else "lib/N64Recomp/build-linux/N64Recomp")), CONFIG.name], cwd=ROOT,
                        capture_output=True, text=True)
     log = r.stdout + r.stderr
     (ROOT / "build").mkdir(exist_ok=True)

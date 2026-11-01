@@ -33,6 +33,7 @@
 
 #include "SDL.h"
 #include "SDL_syswm.h"
+#include "kig_linux_compat.h"
 
 #include "kig_capture.h"
 #include "kig_input.h"

@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20)
 project(KIGRecomp VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 17)
@@ -27,13 +27,18 @@ set(RT64_STATIC TRUE)
 set(RT64_SDL_WINDOW_VULKAN TRUE)
 add_compile_definitions(HLSL_CPU)
 
-include(FetchContent)
-set(SDL2_VERSION "2.30.3" CACHE STRING "SDL2 version to fetch")
-FetchContent_Declare(sdl2
-    URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip)
-FetchContent_MakeAvailable(sdl2)
-include_directories(${sdl2_SOURCE_DIR}/include)
-link_directories(${sdl2_SOURCE_DIR}/lib/x64)
+if(WIN32)
+    include(FetchContent)
+    set(SDL2_VERSION "2.30.3" CACHE STRING "SDL2 version to fetch")
+    FetchContent_Declare(sdl2
+        URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip)
+    FetchContent_MakeAvailable(sdl2)
+    include_directories(${sdl2_SOURCE_DIR}/include)
+    link_directories(${sdl2_SOURCE_DIR}/lib/x64)
+else()
+    find_package(SDL2 REQUIRED)
+    find_package(Threads REQUIRED)
+endif()
 
 # This project's changes to the runtime (patches/runtime/, applied in file-name order). A hash of the patch
 # set is kept in the submodule's git directory; when it differs (first configure, or patches added or
@@ -177,7 +182,7 @@ set_source_files_properties(${FUNC_C_SOURCES} PROPERTIES COMPILE_OPTIONS
 # -Wno-shift-op-parentheses: librecomp's rsp_vu_impl.hpp writes `result >> 31 - shift`, which is the
 # intended (31 - shift) grouping; the warning is in the runtime header, not generated code.
 set_source_files_properties(${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp PROPERTIES COMPILE_OPTIONS
-    "/clang:-march=nehalem;-Wno-unused-variable;-Wno-unused-label;-Wno-unused-but-set-variable;-Wno-shift-op-parentheses")
+    "$<$<BOOL:${WIN32}>:/clang:-march=nehalem>$<$<NOT:$<BOOL:${WIN32}>>:-march=nehalem>;-Wno-unused-variable;-Wno-unused-label;-Wno-unused-but-set-variable;-Wno-shift-op-parentheses")
 
 # Icon and version resource; res/kig.ico comes from tools/make_icon.py.
 set(KIG_RES_DIR ${CMAKE_SOURCE_DIR}/res)
@@ -224,25 +229,32 @@ target_compile_definitions(kig PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS KIG_VERS
                            IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
 # nfd (nativefiledialog-extended, built by RT64): the launcher's ROM picker. plume (RT64's graphics
 # layer) and RT64's ImGui: the launcher and settings menu (src/main/ui_render.cpp).
-target_link_libraries(kig PRIVATE KIGRecompiled librecomp ultramodern rt64 plume nfd SDL2 Winmm.lib Dbghelp.lib)
+target_link_libraries(kig PRIVATE
+    KIGRecompiled librecomp ultramodern rt64 plume nfd
+)
 
-# Identical code folding would merge distinct recompiled functions (Zelda64Recomp does the same).
-target_link_options(kig PRIVATE /OPT:NOICF)
-# Release builds still get a PDB (public symbols for every function, full debug info for our own
-# sources) so the crash handler can name recompiled functions. /DEBUG defaults to /OPT:NOREF; keep REF.
-target_compile_options(kig PRIVATE /Z7)
-target_link_options(kig PRIVATE /DEBUG /OPT:REF)
-# GUI program by default: no console window; output goes to logs/kig.log (src/main/log.cpp),
-# and --console shows it in a console. mainCRTStartup keeps main() as the entry point.
-if(KIG_CONSOLE)
-    set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+if(WIN32)
+    target_link_libraries(kig PRIVATE SDL2 Winmm.lib Dbghelp.lib)
+    target_link_options(kig PRIVATE /OPT:NOICF /DEBUG /OPT:REF)
+    target_compile_options(kig PRIVATE /Z7)
+
+    if(KIG_CONSOLE)
+        set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    else()
+        set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+    endif()
+
+    add_custom_command(TARGET kig POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${sdl2_SOURCE_DIR}/lib/x64/SDL2.dll"
+            "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxil.dll"
+            "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
+            $<TARGET_FILE_DIR:kig>)
 else()
-    set_target_properties(kig PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+    find_package(Threads REQUIRED)
+    target_link_libraries(kig PRIVATE
+        SDL2::SDL2
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+    )
 endif()
-
-add_custom_command(TARGET kig POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${sdl2_SOURCE_DIR}/lib/x64/SDL2.dll"
-        "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxil.dll"
-        "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
-        $<TARGET_FILE_DIR:kig>)
