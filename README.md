@@ -49,6 +49,10 @@ tools\cmake_build.bat kig
 The finished game is at `build/cmake/kig.exe`. The last two steps need the Visual Studio build
 environment; `tools\cmake_build.bat` sets it up for you.
 
+## Experimental Linux build guide
+
+New to compiling software on Linux? See the [beginner-friendly Linux build guide](docs/linux-build-guide.md) for Arch Linux / CachyOS, including ROM verification, dependencies, Fish/Bash instructions, symbol generation and troubleshooting. **The native Linux port is not yet in `main`**; follow the guide's instructions to check out the pending [`linux-port` branch](https://github.com/geno55/kigold-recomp/pull/1) before attempting to build.
+
 ## For developers
 
 How the port works, the fixes it needed, the build pipeline and the testing tools are described in
