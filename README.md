@@ -51,6 +51,8 @@ environment; `tools\cmake_build.bat` sets it up for you.
 
 ## Building on Linux (CachyOS / Arch Linux)
 
+**New to compiling Linux software?** Start with the [step-by-step beginner's build guide](docs/linux-build-guide.md), which explains setup, ROM verification, Fish/Bash activation, compilation, and troubleshooting.
+
 A native Linux build requires Clang, CMake, Ninja, SDL2 development headers, Vulkan development
 headers and loader, GTK 3 development files (for the native file dialog), Python and Git. The tested
 CachyOS system used Clang 23.1.4, CMake 4.4.5, Python 3.14.8, and
