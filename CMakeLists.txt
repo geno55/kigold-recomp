@@ -212,7 +212,7 @@ set_source_files_properties(${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp PROPERTIES COMPI
 # Icon and version resource; res/kig.ico comes from tools/make_icon.py.
 set(KIG_RES_DIR ${CMAKE_SOURCE_DIR}/res)
 configure_file(${CMAKE_SOURCE_DIR}/res/kig.rc.in ${CMAKE_BINARY_DIR}/kig.rc @ONLY)
-# Ninja does not inspect the .rc file for its icon dependency.
+# Ninja doesn't scan .rc files for what they include, so a new icon wouldn't rebuild the resource.
 set_source_files_properties(${CMAKE_BINARY_DIR}/kig.rc PROPERTIES OBJECT_DEPENDS ${KIG_RES_DIR}/kig.ico)
 
 # ---------------------------------------------------------------------------------------------
