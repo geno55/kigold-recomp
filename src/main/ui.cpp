@@ -556,12 +556,8 @@ namespace {
         ImDrawList* bg = ImGui::GetBackgroundDrawList();
         const ImVec2 size = ImGui::GetIO().DisplaySize;
         if (solid) {
-            bg->AddRectFilledMultiColor(ImVec2(0, 0), size, IM_COL32(16, 30, 52, 255), IM_COL32(16, 30, 52, 255),
-                                        IM_COL32(4, 8, 14, 255), IM_COL32(4, 8, 14, 255));
-            // A faint centre line and circle, like a rink.
-            const float cx = size.x * 0.5f, cy = size.y * 0.5f;
-            bg->AddLine(ImVec2(cx, 0), ImVec2(cx, size.y), IM_COL32(200, 40, 40, 40), 6.0f * scale);
-            bg->AddCircle(ImVec2(cx, cy), size.y * 0.22f, IM_COL32(60, 120, 220, 40), 64, 5.0f * scale);
+            bg->AddRectFilledMultiColor(ImVec2(0, 0), size, IM_COL32(44, 32, 12, 255), IM_COL32(44, 32, 12, 255),
+                                        IM_COL32(8, 6, 4, 255), IM_COL32(8, 6, 4, 255));
         } else {
             bg->AddRectFilled(ImVec2(0, 0), size, IM_COL32(0, 0, 0, 150));
         }
