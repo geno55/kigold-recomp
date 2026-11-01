@@ -92,31 +92,10 @@ The generator uses native `N64Recomp` and `RSPRecomp` binaries from `lib/N64Reco
 you can override their paths with CMake's `N64RECOMP_EXE` and `RSPRECOMP_EXE` cache entries.
 
 The Linux symbol workflow uses `tools/regen_syms_linux.py` in place of the PowerShell-only
-`tools/regen_syms.ps1`. Splat 0.50.1 rejects free-text `manual:` symbol annotations; the script
-creates a temporary Splat-compatible copy in `build/`, preserving the tracked annotations. It
-uses the checked-in library symbol names and does **not** rerun `tools/kig_libsyms.py`, which
-additionally requires W.G. 3D Hockey reference files. The original library symbol metadata
-remains unchanged.
+`tools/regen_syms.ps1`. It uses the checked-in library symbol names and does **not** rerun
+`tools/kig_libsyms.py`, which additionally requires W.G. 3D Hockey reference files.
 
 ### Linux troubleshooting and known issues
-
-**Splat 0.50.1 and `manual:` annotations:** Directly running
-`python -m splat split splat/kig.us.yaml` fails when parsing the original
-`syms/libultra_symbols.txt`, for example:
-
-```text
-Missing attribute value in 'manual:', is there extra whitespace?
-```
-
-The free-text annotation (e.g. `manual: VI manager thread...`) is valid
-identification metadata for this repository, and `tools/gen_syms.py` reads
-the named functions correctly. This is a **Splat parsing compatibility issue**,
-not bad source annotations. The Linux regeneration script writes
-`build/libultra_symbols_splat.txt` and `splat/kig.local.yaml`, changing
-the annotation to a Splat-compatible `manual` flag **only in the generated
-copy**. The tracked symbol file and its explanations remain untouched.
-To regenerate the underlying library-name source itself, the separate
-W.G. 3D Hockey reference project is still required.
 
 **Wayland shutdown SIGSEGV:** With CachyOS KDE Wayland,
 `sdl2-compat 2.32.74-1.1`, and an RTX 5080, closing the game window

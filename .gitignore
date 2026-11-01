@@ -28,4 +28,3 @@ docs/phase*.md
 local_paths.toml
 
 .venv/
-splat/kig.local.yaml

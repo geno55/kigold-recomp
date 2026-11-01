@@ -2,7 +2,7 @@
 
 This guide explains the commands from scratch. It is for **Arch Linux / CachyOS**, where the native Linux port has been tested. Other distributions need different package-install commands and may behave differently. You do **not** need Windows, Wine, or Proton.
 
-> **Important:** This guide currently applies to the experimental `linux-port` branch. A source build needs your own legally obtained **Killer Instinct Gold (US, Rev 2 / v1.2)** game dump. The repository does not provide the ROM.
+> **Important:** The Linux port is experimental. A source build needs your own legally obtained **Killer Instinct Gold (US, Rev 2 / v1.2)** game dump. The repository does not provide the ROM.
 
 ## 1. Open a terminal and install the tools
 
@@ -35,13 +35,13 @@ Choose where you want the project. This example uses a `Projects` directory in y
 ```sh
 mkdir -p ~/Projects
 cd ~/Projects
-git clone --recurse-submodules --branch linux-port https://github.com/robzombie91/kigold-recomp.git
+git clone --recurse-submodules https://github.com/geno55/kigold-recomp.git
 cd kigold-recomp
 ```
 
 **Why `--recurse-submodules`?** It also downloads required libraries such as N64Recomp and RT64. If you already cloned without it, run `git submodule update --init --recursive` inside the project.
 
-If `git clone` says the directory already exists, **don't delete it**. Instead, use your existing checkout and ensure it is on the desired branch.
+If `git clone` says the directory already exists, **don't delete it**. Instead, use your existing checkout and ensure it is on the `main` branch.
 
 ## 3. Supply and verify your own ROM
 
@@ -137,9 +137,9 @@ Successful output includes messages similar to:
 N64Recomp exit 0; Function count: 1919; 36 C files in RecompiledFuncs/
 ```
 
-**Why a special Linux script?** Splat 0.50.1 can reject the free-text `manual:` notes in `syms/libultra_symbols.txt`. The script makes a temporary compatible input without removing the maintainer's annotations. It reuses checked-in library names; rebuilding the underlying library-name source itself requires a separate W.G. 3D Hockey reference project, which is **not** required for the normal Linux build.
+**Why a special Linux script?** `tools/regen_syms.ps1` needs PowerShell; this script runs the same steps. It reuses checked-in library names; rebuilding the underlying library-name source itself requires a separate W.G. 3D Hockey reference project, which is **not** required for the normal Linux build.
 
-Some analysis warnings can appear. A Python traceback or a nonzero exit, however, indicates failure; resolve that before building the game.
+Some analysis warnings can appear, including a long `PROBLEMS:` list from `tools/export_splat.py`, which is expected. A Python traceback or a nonzero exit from the script, however, indicates failure; resolve that before building the game.
 
 ## 7. Compile the actual game
 
@@ -191,8 +191,7 @@ This changes only the SDL video backend for that launch.
 | `No module named splat/rabbitizer` | Did you activate `.venv` and run the pip command? |
 | `baserom.us.z64` missing or wrong SHA-1 | Check location, filename, and exact ROM revision in step 3. |
 | `N64Recomp` or `RSPRecomp` missing | Recheck step 5, especially the tool build output. |
-| Splat complains about `manual:` | Use `python tools/regen_syms_linux.py` rather than running Splat directly against the original YAML. |
-| `SDL_Vulkan_CreateSurface` fails | Ensure you built the current `linux-port` branch, have a working Vulkan driver, and did not disable the Linux `RT64_SDL_WINDOW_VULKAN` compile definition. |
+| `SDL_Vulkan_CreateSurface` fails | Ensure you built the current `main` branch, have a working Vulkan driver, and did not disable the Linux `RT64_SDL_WINDOW_VULKAN` compile definition. |
 | Wayland SIGSEGV when closing | Use the X11 launch command from step 8; see the README's Linux known issues. |
 
 ## Rebuilding after you change code
