@@ -1,4 +1,4 @@
-"""Normalize a Wayne Gretzky's 3D Hockey (US) ROM to big-endian .z64 and verify it.
+"""Normalize a Killer Instinct Gold (USA Rev 2) ROM to big-endian .z64 and verify it.
 
 Usage: python tools/rom_prep.py <input.{z64,v64,n64}> [output.z64]
 Default output: baserom.us.z64 in the project root.
@@ -9,8 +9,8 @@ import sys
 import zlib
 from pathlib import Path
 
-EXPECTED_SHA1 = "400aa84811f1f2f6c62c756b43b54d534d5a5ec8"  # US V1.0, big-endian
-EXPECTED_CRC = (0x6B45223F, 0xF00E5C56)
+EXPECTED_SHA1 = "aaeb492b1e538af65a3544a97240675ef438a04f"  # USA Rev 2, big-endian
+EXPECTED_CRC = (0xF908CA4C, 0x36464327)
 
 # CRC32 of IPL3 (ROM 0x40..0x1000) -> CIC variant
 IPL3_CRCS = {
@@ -81,7 +81,7 @@ def main() -> int:
 
     ok = True
     if sha1 != EXPECTED_SHA1:
-        print("ERROR: sha1 mismatch (expected US V1.0)")
+        print("ERROR: sha1 mismatch (expected USA Rev 2)")
         ok = False
     if (crc1, crc2) != EXPECTED_CRC:
         print("ERROR: header CRC mismatch")

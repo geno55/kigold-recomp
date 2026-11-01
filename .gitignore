@@ -8,7 +8,6 @@
 assets/
 RecompiledFuncs/
 rsp/aspMain.cpp
-include/wg3d_skipped.h
 
 # Build outputs, logs, captures, ROM-derived references (build/ref), analysis scratch.
 build/
@@ -20,7 +19,6 @@ __pycache__/
 .vscode/
 .claude/
 RecompiledFuncsTrace/
-wg3d.us.trace.toml
 kig.us.trace.toml
 
 # Per-phase planning/status notes stay local
