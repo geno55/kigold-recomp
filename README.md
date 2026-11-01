@@ -96,8 +96,37 @@ uses the checked-in library symbol names and does **not** rerun `tools/kig_libsy
 additionally requires W.G. 3D Hockey reference files. The original library symbol metadata
 remains unchanged.
 
-**Known limitation:** Native Wayland on the tested CachyOS system can crash on application close
-(exit status 139), although gameplay starts normally. One X11/XWayland run closed cleanly.
+### Linux troubleshooting and known issues
+
+**Splat 0.50.1 and `manual:` annotations:** Directly running
+`python -m splat split splat/kig.us.yaml` fails when parsing the original
+`syms/libultra_symbols.txt`, for example:
+
+```text
+Missing attribute value in 'manual:', is there extra whitespace?
+```
+
+The free-text annotation (e.g. `manual: VI manager thread...`) is valid
+identification metadata for this repository, and `tools/gen_syms.py` reads
+the named functions correctly. This is a **Splat parsing compatibility issue**,
+not bad source annotations. The Linux regeneration script writes
+`build/libultra_symbols_splat.txt` and `splat/kig.local.yaml`, changing
+the annotation to a Splat-compatible `manual` flag **only in the generated
+copy**. The tracked symbol file and its explanations remain untouched.
+To regenerate the underlying library-name source itself, the separate
+W.G. 3D Hockey reference project is still required.
+
+**Wayland shutdown SIGSEGV:** With CachyOS KDE Wayland,
+`sdl2-compat 2.32.74-1.1`, and an RTX 5080, closing the game window
+can result in `SIGSEGV` (exit status 139). Vulkan, sound, ROM loading
+and gameplay startup are successful. An X11/XWayland run exited normally;
+two Wayland runs under GDB also exited normally, so no reliable backtrace
+has been captured. Cause unconfirmed; it may be timing or backend specific.
+As a temporary workaround, run `env SDL_VIDEODRIVER=x11 ./build/cmake-linux/kig`.
+This is being tracked separately from native Linux compilation support.
+
+**Other limitations:** Other Linux distributions have not been tested
+in this PR, and AppImage packaging is not automated.
 
 ## For developers
 
