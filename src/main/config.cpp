@@ -97,8 +97,8 @@ namespace {
             { { WindowMode::Windowed, "Windowed" }, { WindowMode::Fullscreen, "Fullscreen" } },
             WindowMode::Windowed);
         graphics.add_enum_option("aspect_ratio", "Aspect ratio",
-            "Expand renders the game wider than 4:3. Untested; may show culling and HUD problems.",
-            { { AspectRatio::Original, "Original" }, { AspectRatio::Expand, "Expand" } },
+            "Original: 4:3, as on the N64. Expand: fills wider screens, but the game was made for 4:3, so the sides show broken scenery.",
+            { { AspectRatio::Original, "Original" }, { AspectRatio::Expand, "Expand", "Expand (experimental)" } },
             AspectRatio::Original);
         graphics.add_enum_option("hud_ratio", "HUD aspect ratio", "",
             { { HUDRatioMode::Original, "Original" }, { HUDRatioMode::Clamp16x9, "Clamp16x9", "Clamp to 16:9" },
