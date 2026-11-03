@@ -1,0 +1,209 @@
+diff --git a/src/hle/rt64_draw_call.h b/src/hle/rt64_draw_call.h
+index 0e62be1..6e2ad88 100644
+--- a/src/hle/rt64_draw_call.h
++++ b/src/hle/rt64_draw_call.h
+@@ -96,6 +96,7 @@ namespace RT64 {
+         uint8_t textureTile;
+         uint8_t textureLevels;
+         bool NoN;
++        bool expandExtended;  // kig patch: drawn past its scissor for the Expand aspect ratio (RDP::drawTexRect)
+ 
+         // RSP specific parameters.
+         uint32_t geometryMode;
+diff --git a/src/hle/rt64_interpreter.cpp b/src/hle/rt64_interpreter.cpp
+index dccaa87..f30ca76 100644
+--- a/src/hle/rt64_interpreter.cpp
++++ b/src/hle/rt64_interpreter.cpp
+@@ -51,6 +51,7 @@ namespace RT64 {
+ 
+     void Interpreter::processRDPLists(uint32_t dlStartAdddress, DisplayList *dlStart, DisplayList *dlEnd) {
+         state->dlCpuProfiler.start();
++        state->rdp->inRawRdpList = true;  // kig patch: see RDP::drawTexRect
+ 
+         // Update the state with the current display list address.
+         state->displayListAddress = dlStartAdddress;
+@@ -157,6 +158,7 @@ namespace RT64 {
+         assert(hleGBI != nullptr);
+ 
+         state->dlCpuProfiler.start();
++        state->rdp->inRawRdpList = false;  // kig patch: see RDP::drawTexRect
+ 
+         // Update the state with the current display list address.
+         state->displayListAddress = dlStartAdddress;
+diff --git a/src/hle/rt64_rdp.cpp b/src/hle/rt64_rdp.cpp
+index a10c11a..b3d5183 100644
+--- a/src/hle/rt64_rdp.cpp
++++ b/src/hle/rt64_rdp.cpp
+@@ -1339,7 +1339,47 @@ namespace RT64 {
+             lry |= 3;
+         }
+ 
++        // kig patch: with the Expand aspect ratio, a repeating texture rectangle from a raw RDP list that reaches
++        // one side of a full-width scissor (a background band drawn in several strips, like KI Gold's character
++        // select fire) is extended past that side by a screen width, its texture continuing, so it fills the
++        // wider screen. Only the strips at the edges reach a side; a rectangle that covers the whole width is
++        // already stretched when drawn. Gfx task rectangles (sprites that happen to touch an edge) are left alone.
++        const FixedRect &expandScissor = scissorRectStack[scissorStackSize - 1];
++        const LoadTile &expandTile = tiles[tile];
++        const bool expandCandidate = inRawRdpList && (state->ext.userConfig->aspectRatio == UserConfiguration::AspectRatio::Expand) && !flip &&
++            !expandScissor.isNull() && (expandScissor.ulx <= 0) && (expandScissor.lrx >= int32_t(colorImage.width << 2) - 4) &&
++            (extAlignment.leftOrigin == G_EX_ORIGIN_NONE) && (extAlignment.rightOrigin == G_EX_ORIGIN_NONE) &&
++            ((expandTile.cms & G_TX_CLAMP) == 0) && (expandTile.masks > 0);
++        // A sliver at the edge (KI Gold's fire also redraws a 1-pixel column at the right) is skipped: its
++        // texture doesn't line up with the strip next to it, which is extended over it, and on a wider screen
++        // that column is no longer at the edge, so it showed as a line.
++        constexpr int32_t MinExpandWidth = 8 << 2;
++        if (expandCandidate && ((lrx - ulx) < MinExpandWidth) && ((ulx <= expandScissor.ulx) || (lrx >= expandScissor.lrx - 4))) {
++            return;
++        }
++        bool extended = false;
++        if (expandCandidate) {
++            const bool reachesLeft = (ulx <= expandScissor.ulx);
++            const bool reachesRight = (lrx >= expandScissor.lrx - 4);
++            const int32_t extension = expandScissor.lrx - expandScissor.ulx;
++            if (reachesLeft && !reachesRight) {
++                const int32_t newUls = uls - (int32_t(dsdx) * extension) / 128;
++                if (newUls >= INT16_MIN) {
++                    ulx -= extension;
++                    uls = int16_t(newUls);
++                    extended = true;
++                }
++            }
++            else if (reachesRight && !reachesLeft) {
++                lrx += extension;
++                extended = true;
++            }
++        }
++
+         drawRect(ulx, uly, lrx, lry, uls, ult, dsdx, dtdy, flip, extAlignment);
++        if (extended) {
++            state->drawCall.expandExtended = true;  // the renderer clips it to the wide screen
++        }
+     }
+ 
+     void RDP::updateCallTexcoords(float u, float v) {
+diff --git a/src/hle/rt64_rdp.h b/src/hle/rt64_rdp.h
+index 84f4e7c..54d8ea9 100644
+--- a/src/hle/rt64_rdp.h
++++ b/src/hle/rt64_rdp.h
+@@ -73,6 +73,7 @@ namespace RT64 {
+         LoadTexture texture = {};
+         LoadTile tiles[RDP_TILES] = {};
+         uint64_t tileReplacementHashes[RDP_TILES] = {};
++        bool inRawRdpList = false;  // kig patch: commands come from a raw RDP list, not a gfx task
+ 
+         struct {
+             uint32_t address = 0;
+diff --git a/src/hle/rt64_state.cpp b/src/hle/rt64_state.cpp
+index 2970e71..56afafd 100644
+--- a/src/hle/rt64_state.cpp
++++ b/src/hle/rt64_state.cpp
+@@ -132,6 +132,7 @@ namespace RT64 {
+         drawCall.cullBothMask = 0;
+         drawCall.shadingSmoothMask = 0;
+         drawCall.NoN = false;
++        drawCall.expandExtended = false;
+         drawCall.extendedType = DrawExtendedType::None;
+         drawCall.extendedFlags = {};
+         drawCall.drawStatusChanges = 0;
+@@ -525,8 +526,9 @@ namespace RT64 {
+         drawCall.minWorldMatrix = USHRT_MAX;
+         drawCall.maxWorldMatrix = 0;
+         drawCall.triangleCount = 0;
++        drawCall.expandExtended = false;
+     }
+-    
++
+     void State::submitFramebufferPair(FramebufferPair::FlushReason flushReason) {
+         const int workloadCursor = ext.workloadQueue->writeCursor;
+         Workload &workload = ext.workloadQueue->workloads[workloadCursor];
+diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
+index 9fae0d4..73dd27c 100644
+--- a/src/render/rt64_framebuffer_renderer.cpp
++++ b/src/render/rt64_framebuffer_renderer.cpp
+@@ -1678,6 +1678,15 @@ namespace RT64 {
+ 
+                         triangles.scissor = convertFixedRect(call.callDesc.scissorRect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, int32_t(horizontalMisalignment), call.callDesc.scissorLeftOrigin, call.callDesc.scissorRightOrigin);
+ 
++                        // kig patch: a rectangle or raw triangles extended past the scissor for the Expand aspect ratio
++                        // (RDP::drawTexRect, the raw triangle command) are clipped horizontally to the whole wide screen,
++                        // not to the 4:3 area (KI Gold's full-width scissor also stops a pixel short of the edge).
++                        // Anything else that is partly off screen stays clipped as before.
++                        if (call.callDesc.expandExtended) {
++                            triangles.scissor.left = 0;
++                            triangles.scissor.right = int32_t(std::ceil(wideWidth));
++                        }
++
+                         bool usesViewport = (proj.type == Projection::Type::Perspective) || (proj.type == Projection::Type::Orthographic);
+                         if (usesViewport) {
+                             triangles.scissor = viewportScissorIntersection(viewportClip, triangles.scissor);
+diff --git a/src/gbi/rt64_gbi_rdp.cpp b/src/gbi/rt64_gbi_rdp.cpp
+index fc2fa3c..4c67530 100644
+--- a/src/gbi/rt64_gbi_rdp.cpp
++++ b/src/gbi/rt64_gbi_rdp.cpp
+@@ -645,7 +645,35 @@ namespace RT64 {
+             };
+ 
+             const FixedRect &scissor = state->rdp->scissorRectStack[state->rdp->scissorStackSize - 1];
+-            const float clipBounds[4] = { scissor.ulx / 4.0f, scissor.uly / 4.0f, scissor.lrx / 4.0f, scissor.lry / 4.0f };
++            float clipBounds[4] = { scissor.ulx / 4.0f, scissor.uly / 4.0f, scissor.lrx / 4.0f, scissor.lry / 4.0f };
++
++            // kig patch: with the Expand aspect ratio, a raw RDP list's trapezoid that reaches a side of a full-width
++            // scissor (KI Gold's CPU-built stage backdrops) is extended past that side by half a screen width, its
++            // colour and texture continuing along their planes, so it fills the wider screen instead of leaving the
++            // sides undrawn. The clip bounds widen to match.
++            const float sideLeft = clipBounds[0], sideRight = clipBounds[2];
++            const bool expandTris = state->rdp->inRawRdpList &&
++                (state->ext.userConfig->aspectRatio == UserConfiguration::AspectRatio::Expand) && !scissor.isNull() &&
++                (scissor.ulx <= 0) && (scissor.lrx >= int32_t(state->rdp->colorImage.width << 2) - 4);
++            const float expandBy = (sideRight - sideLeft) * 0.5f;
++            bool expandedTris = false;
++            if (expandTris) {
++                clipBounds[0] -= expandBy;
++                clipBounds[2] += expandBy;
++            }
++            // Within a pixel and a half of a side counts as reaching it: the fight backdrop's edge is at 319 with a
++            // scissor ending at 320.
++            auto toSide = [&](ClipVertex v) {
++                if (expandTris && (v.x <= sideLeft + 1.5f)) {
++                    expandedTris = true;
++                    return corner(sideLeft - expandBy, v.y);
++                }
++                if (expandTris && (v.x >= sideRight - 1.5f)) {
++                    expandedTris = true;
++                    return corner(sideRight + expandBy, v.y);
++                }
++                return v;
++            };
+             static thread_local std::vector<ClipVertex> clippedTris;
+             clippedTris.clear();
+             auto clipAndAdd = [&](ClipVertex *polyA, int polyCount) {
+@@ -682,14 +710,14 @@ namespace RT64 {
+                 }
+             };
+             if (edgeYm > edgeYh) {
+-                ClipVertex upper[12] = { corner(xOnH(edgeYh), edgeYh), corner(xOnM(edgeYh), edgeYh),
+-                                         corner(xOnM(edgeYm), edgeYm), corner(xOnH(edgeYm), edgeYm) };
++                ClipVertex upper[12] = { toSide(corner(xOnH(edgeYh), edgeYh)), toSide(corner(xOnM(edgeYh), edgeYh)),
++                                         toSide(corner(xOnM(edgeYm), edgeYm)), toSide(corner(xOnH(edgeYm), edgeYm)) };
+                 clipAndAdd(upper, 4);
+             }
+             if (edgeYl > edgeYm) {
+                 const float yTop = std::max(edgeYm, edgeYh);
+-                ClipVertex lower[12] = { corner(xOnH(yTop), yTop), corner(xOnL(yTop), yTop),
+-                                         corner(xOnL(edgeYl), edgeYl), corner(xOnH(edgeYl), edgeYl) };
++                ClipVertex lower[12] = { toSide(corner(xOnH(yTop), yTop)), toSide(corner(xOnL(yTop), yTop)),
++                                         toSide(corner(xOnL(edgeYl), edgeYl)), toSide(corner(xOnH(edgeYl), edgeYl)) };
+                 clipAndAdd(lower, 4);
+             }
+ 
+@@ -726,6 +754,9 @@ namespace RT64 {
+                     emit(v, clippedTris[v]);
+                 }
+                 state->rdp->drawTris((uint32_t)(vertCount / 3),&posWorkBuffer.data()[0][0], &texcoordWorkBuffer.data()[0][0], &colorWorkBuffer[0][0], tile, level);
++                if (expandedTris) {
++                    state->drawCall.expandExtended = true;  // kig patch: the renderer clips it to the wide screen
++                }
+             }
+ 
+             return trianglesEnd;
