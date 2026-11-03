@@ -8,6 +8,9 @@
 // KIG_WRITE_WATCH=<hex N64 address>[,<max hits>[,<from script time>]] logs the native function (and its
 // callers) of every write to that RDRAM word, from that time on (debugging: its 4 KB page is made
 // read-only, and each write to the page is single-stepped).
+// KIG_PTR_CHECK=1 logs, with every thread's stack, when one of two pointers that crash reports found bad
+// goes wrong: the display list pointer (0x8004A318) and the controller pointer table (0x800683C0), which
+// never changes once set. Unless KIG_WRITE_WATCH is set, it also write-watches that table.
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -40,10 +43,15 @@ namespace {
 }
 
 static void arm_write_watch();
+static void pointer_check_thread();
 
 void kig::crash::set_rdram(uint8_t* rdram) {
     rdram_base = rdram;
     arm_write_watch();
+    if (std::getenv("KIG_PTR_CHECK")) {
+        std::fprintf(stderr, "[kig] pointer check on\n");
+        std::thread{ pointer_check_thread }.detach();
+    }
 }
 
 void kig::crash::set_dialogs(bool enabled) {
@@ -219,6 +227,7 @@ namespace {
 namespace {
     uint8_t* watch_page = nullptr;
     uint8_t* watch_target = nullptr;
+    size_t watch_bytes = 4;
     int watch_hits_left = 0;
     double watch_from = 0;  // script time hits start to count from
     thread_local bool watch_stepping = false;
@@ -240,7 +249,7 @@ namespace {
             return EXCEPTION_CONTINUE_SEARCH;
         }
         // RDRAM words are host-order: the N64 word's 4 bytes are the 4 host bytes at the same aligned offset.
-        if (target >= watch_target && target < watch_target + 4) {
+        if (target >= watch_target && target < watch_target + watch_bytes) {
             std::lock_guard lock{ watch_mutex };
             if (watch_hits_left > 0 && kig::input::script_time() >= watch_from) {
                 watch_hits_left--;
@@ -248,7 +257,7 @@ namespace {
                 std::lock_guard sym_lock{ dbghelp_mutex };
                 init_symbols(process);
                 std::fprintf(stderr, "[kig] write watch t=%.2f: %08X written by ", kig::input::script_time(),
-                             static_cast<uint32_t>(watch_target - rdram_base + 0x80000000ULL));
+                             static_cast<uint32_t>(target - rdram_base + 0x80000000ULL));
                 describe_address(stderr, process, reinterpret_cast<uint64_t>(rec->ExceptionAddress));
                 walk_stack(stderr, process, GetCurrentThread(), *info->ContextRecord, 6);
                 kig::trace::dump_current_thread(stderr);  // trace builds with KIG_TRACE=1: the calls leading here
@@ -264,6 +273,10 @@ namespace {
 
 static void arm_write_watch() {
     const char* spec = std::getenv("KIG_WRITE_WATCH");
+    if (!spec && std::getenv("KIG_PTR_CHECK")) {
+        spec = "800683C0,40,1";  // from 1s of game time: loading the boot code writes the page first
+        watch_bytes = 16;
+    }
     if (!spec || !rdram_base) return;
     const uint32_t addr = static_cast<uint32_t>(std::strtoul(spec, nullptr, 16)) & ~3u;
     const char* comma = std::strchr(spec, ',');
@@ -344,3 +357,42 @@ void kig::crash::install() {}
 
 void kig::crash::dump_all_threads(FILE*) {}
 #endif
+
+// KIG_PTR_CHECK (see the top of the file). RDRAM words are host-order, so these read as the N64 does.
+static void pointer_check_thread() {
+    constexpr uint32_t GfxPointer = 0x8004A318, PadTable = 0x800683C0;
+    const uint32_t pad_table[4] = { 0x800683A8, 0x800683AE, 0x800683B4, 0x800683BA };
+    const auto word = [](uint32_t addr) {
+        return *reinterpret_cast<volatile uint32_t*>(rdram_base + (addr - 0x80000000u));
+    };
+    const auto report = [&](const char* what, uint32_t addr) {
+        std::fprintf(stderr, "[kig] pointer check t=%.2f: %s at %08X is bad:", kig::input::script_time(), what, addr);
+        for (uint32_t i = 0; i < 8; i++) {
+            std::fprintf(stderr, " %08X", word(addr - 0x10 + i * 4));
+        }
+        std::fprintf(stderr, " (from %08X)\n", addr - 0x10);
+        kig::crash::dump_all_threads(stderr);
+        kig::log::flush();
+    };
+    // Each is checked only once the game has set it (RDRAM holds leftover data before that).
+    bool table_set = false, table_reported = false, gfx_set = false, gfx_reported = false;
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        bool table_ok = true;
+        for (uint32_t i = 0; i < 4; i++) {
+            table_ok &= word(PadTable + i * 4) == pad_table[i];
+        }
+        table_set |= table_ok;
+        if (table_set && !table_ok && !table_reported) {
+            table_reported = true;
+            report("controller pointer table", PadTable);
+        }
+        const uint32_t gfx = word(GfxPointer);
+        const bool gfx_ok = gfx == 0 || (gfx >= 0x80000000u && gfx < 0x80800000u && (gfx & 7) == 0);
+        gfx_set |= gfx_ok && gfx != 0;
+        if (gfx_set && !gfx_ok && !gfx_reported) {
+            gfx_reported = true;
+            report("display list pointer", GfxPointer);
+        }
+    }
+}
