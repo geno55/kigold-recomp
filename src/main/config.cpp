@@ -100,10 +100,6 @@ namespace {
             "Original: 4:3, as on the N64. Expand: fills wider screens, but the game was made for 4:3, so the sides show broken scenery.",
             { { AspectRatio::Original, "Original" }, { AspectRatio::Expand, "Expand", "Expand (experimental)" } },
             AspectRatio::Original);
-        graphics.add_enum_option("hud_ratio", "HUD aspect ratio", "",
-            { { HUDRatioMode::Original, "Original" }, { HUDRatioMode::Clamp16x9, "Clamp16x9", "Clamp to 16:9" },
-              { HUDRatioMode::Full, "Full" } },
-            HUDRatioMode::Original);
         graphics.add_enum_option("antialiasing", "Antialiasing", "",
             { { Antialiasing::None, "None" }, { Antialiasing::MSAA2X, "MSAA2X", "MSAA 2x" }, { Antialiasing::MSAA4X, "MSAA4X", "MSAA 4x" },
               { Antialiasing::MSAA8X, "MSAA8X", "MSAA 8x" } },
@@ -144,7 +140,9 @@ namespace {
         g.ds_option = (int)get_number(graphics, "downsampling", 1, 4);
         g.wm_option = get_enum<WindowMode>(graphics, "window_mode");
         g.ar_option = get_enum<AspectRatio>(graphics, "aspect_ratio");
-        g.hr_option = get_enum<HUDRatioMode>(graphics, "hud_ratio");
+        // RT64's HUD aspect ratio only moves elements placed with its extended GBI, which KI Gold doesn't use,
+        // so it isn't offered.
+        g.hr_option = HUDRatioMode::Original;
         g.msaa_option = get_enum<Antialiasing>(graphics, "antialiasing");
         g.rr_option = get_enum<RefreshRate>(graphics, "refresh_rate");
         g.rr_manual_value = (int)get_number(graphics, "refresh_rate_manual", 20, 360);
