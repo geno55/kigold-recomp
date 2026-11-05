@@ -147,6 +147,13 @@ namespace {
                      GetCurrentThreadId());
         print_thread_name(out, GetCurrentThread());
         std::fputc('\n', out);
+        // Which debugging switches were on (test builds turn some on from a .bat file).
+        static const char* const switches[] = { "KIG_PTR_CHECK", "KIG_AUTO_STATE", "KIG_WRITE_WATCH", "KIG_COUNT_SEED" };
+        std::fprintf(out, "[kig] switches:");
+        for (const char* name : switches) {
+            if (const char* v = std::getenv(name)) std::fprintf(out, " %s=%s", name, v);
+        }
+        std::fputc('\n', out);
 
         std::fprintf(out, "[kig] at ");
         describe_address(out, process, reinterpret_cast<uint64_t>(rec->ExceptionAddress));

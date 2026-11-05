@@ -80,6 +80,7 @@ namespace {
     std::filesystem::path request_path;
     std::shared_ptr<State> load_state;
     std::chrono::steady_clock::time_point request_time;
+    bool request_quiet = false;
     kig::savestate::SaveCondition save_condition;  // (read by the idle thread while a save is pending)
     std::string last_wait_reason;
     kig::savestate::Result result;
@@ -93,8 +94,10 @@ namespace {
         result.serial++;
         result.ok = ok;
         result.was_load = was_load;
+        result.quiet = request_quiet && !was_load;
         result.message = message;
         request = Request::None;
+        request_quiet = false;
         load_state.reset();
         fprintf(stderr, "[kig] save state: %s\n", message.c_str());
         kig::log::flush();
@@ -209,6 +212,9 @@ namespace {
             if (td == nullptr || td->ctx == nullptr) { why = "thread " + std::to_string(t->id) + " has no registers"; return false; }
             if (c->park.load() != 1) { why = "thread " + std::to_string(t->id) + " isn't blocked in a message queue"; return false; }
             if (td->ss->depth == 0 || td->ss->depth > RECOMP_SS_MAX) { why = "thread " + std::to_string(t->id) + "'s call chain can't be saved"; return false; }
+            for (uint32_t i = 0; i < td->ss->depth; i++) {
+                if (td->ss->e[i].site == RECOMP_SS_NATIVE_FRAME) { why = "thread " + std::to_string(t->id) + " is in a native frame"; return false; }
+            }
         }
         return true;
     }
@@ -433,12 +439,13 @@ void kig::savestate::on_thread_create(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
-void kig::savestate::request_save(const std::filesystem::path& path, const SaveCondition& condition) {
+void kig::savestate::request_save(const std::filesystem::path& path, const SaveCondition& condition, bool quiet) {
     std::lock_guard lock{ mutex };
     if (request != Request::None) {
         return;
     }
     save_condition = condition;
+    request_quiet = quiet;
     request_path = path;
     request_time = std::chrono::steady_clock::now();
     request.store(Request::Save, std::memory_order_release);

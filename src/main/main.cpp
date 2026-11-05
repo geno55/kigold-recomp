@@ -183,8 +183,27 @@ static void update_gfx(void*) {
     const kig::savestate::Result state_result = kig::savestate::last_result();
     if (state_result.serial != state_serial && !kig::steps::active()) {
         state_serial = state_result.serial;
-        kig::ui::toast(state_result.ok ? (state_result.was_load ? "State loaded" : "State saved") : "Save state: " + state_result.message,
-                       !state_result.ok);
+        if (!state_result.quiet || !state_result.ok) {
+            kig::ui::toast(state_result.ok ? (state_result.was_load ? "State loaded" : "State saved") : "Save state: " + state_result.message,
+                           !state_result.ok);
+        }
+    }
+    // KIG_AUTO_STATE=<seconds> (test builds): a save state every that many seconds of game time, rotating
+    // through states/auto-0..2.kigstate, so a crash leaves a state from shortly before it.
+    static const double auto_state_seconds = [] {
+        const char* v = std::getenv("KIG_AUTO_STATE");
+        return v ? std::atof(v) : 0.0;
+    }();
+    if (auto_state_seconds > 0 && ultramodern::is_game_started() && !kig::savestate::busy()) {
+        static double last_auto = 0.0;
+        static int auto_index = 0;
+        const double t = kig::input::script_time();
+        if (t - last_auto >= auto_state_seconds) {
+            last_auto = t;
+            kig::savestate::request_save(kig::savestate::slot_path().parent_path() / ("auto-" + std::to_string(auto_index) + ".kigstate"),
+                                         {}, true);
+            auto_index = (auto_index + 1) % 3;
+        }
     }
     kig::ui::update();
     kig::input::update();

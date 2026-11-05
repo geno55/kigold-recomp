@@ -29,7 +29,8 @@ namespace kig::savestate {
         int bits = 32;
         uint32_t value = 0;
     };
-    void request_save(const std::filesystem::path& path, const SaveCondition& condition = {});
+    // quiet: no toast for the result (automatic saves).
+    void request_save(const std::filesystem::path& path, const SaveCondition& condition = {}, bool quiet = false);
     bool request_load(const std::filesystem::path& path, std::string* error = nullptr);
     bool busy();  // a request is waiting for a safe point
 
@@ -37,6 +38,7 @@ namespace kig::savestate {
         uint64_t serial = 0;  // increments with every finished request
         bool ok = false;
         bool was_load = false;
+        bool quiet = false;
         std::string message;
     };
     Result last_result();

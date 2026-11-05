@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -17,7 +18,9 @@
 #include "ultramodern/ultramodern.hpp"
 #include "librecomp/game.hpp"
 #include "librecomp/overlays.hpp"
+#include "kig_crash.h"
 #include "kig_input.h"
+#include "kig_log.h"
 #include "kig_patches.h"
 #include "kig_segments.h"
 #include "kig_savestate.h"
@@ -181,12 +184,23 @@ extern "C" void kig_dispatch_entity(uint8_t* rdram, recomp_context* ctx) {
                 (int)((fp - 0x801D34C0u) / 0x100), MEM_BU(0, (gpr)(int32_t)fp), (uint32_t)ctx->r6, restart_targets.size(),
                 (int)ctx->r28);
     }
+    // Save states (src/game/savestate.cpp): this native frame can't be resumed, so it is marked on the
+    // shadow stack (no state is taken while a thread is inside it), and a restart's longjmp skips the
+    // pops of the frames it abandons, so the depth is reset after one.
+    RecompShadowStack* ss = recomp_ss_self();
+    const uint32_t ss_depth = ss->depth;
+    if (ss_depth < RECOMP_SS_MAX) {
+        ss->e[ss_depth] = { RECOMP_SS_NATIVE_FRAME, 0 };
+    }
+    ss->depth = ss_depth + 1;
     restart_targets.push_back(&target);
     if (setjmp(target) != 0) {
         fn = seg2_801B20F4;  // a restart jump; this dispatch is still the innermost
+        ss->depth = ss_depth + 1;
     }
     fn(rdram, ctx);
     restart_targets.pop_back();
+    ss->depth = ss_depth;
     if (trace) {
         fprintf(stderr, "[kig] dispatch return slot %d (fp now %08X gp %d)\n", (int)((fp - 0x801D34C0u) / 0x100),
                 (uint32_t)ctx->r30, (int)ctx->r28);
@@ -203,6 +217,82 @@ extern "C" void kig_restart_state(uint8_t* rdram, recomp_context* ctx) {
         fprintf(stderr, "[kig] fighter state restart at t=%.2f (fp=%08X)\n", kig::input::script_time(), (uint32_t)ctx->r30);
     }
     longjmp(*restart_targets.back(), 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Display list pointer check for #7 (KIG_PTR_CHECK; hooks in tools/gen_config.py). Crash reports show
+// the fight loop's display list head (0x8004A318) holding 0x06000000, the first word of a G_DL command:
+// something made the head point at itself, or wrote over it. The fight loop's two display list buffers
+// start at the address in 0x8004A164, 0x73A0 bytes each; any head outside them is reported once, with
+// the last stores, the call chain, every thread's stack and an RDRAM dump (logs/ptrcheck-rdram.bin,
+// host-order words).
+// ---------------------------------------------------------------------------------------------
+namespace {
+    constexpr uint32_t GfxHead = 0x8004A318, GfxBase = 0x8004A164, GfxBufferSize = 0x73A0;
+    const bool gfx_check_on = std::getenv("KIG_PTR_CHECK") != nullptr;
+    struct GfxStore {
+        uint32_t site;
+        uint32_t value;
+    };
+    constexpr int GfxRing = 32;
+    GfxStore gfx_ring[GfxRing];
+    std::atomic<uint32_t> gfx_ring_next{ 0 };
+    std::atomic<bool> gfx_reported{ false };
+
+    void gfx_validate(uint8_t* rdram, uint32_t site, uint32_t value, bool is_store) {
+        const uint32_t base = (uint32_t)MEM_W(0, (gpr)(int32_t)GfxBase);
+        if (base < 0x80000000u || base >= 0x80800000u) {
+            return;  // not set up yet
+        }
+        if ((value == 0 && !is_store) || (value >= base && value <= base + 2 * GfxBufferSize && (value & 7) == 0)) {
+            return;  // (0 on entry: the fight loop hasn't run since boot)
+        }
+        if (gfx_reported.exchange(true)) {
+            return;
+        }
+        std::fprintf(stderr, "[kig] display list check t=%.3f: head %08X %s %08X (buffers %08X-%08X)\n", kig::input::script_time(),
+                     value, is_store ? "about to be stored at" : "found on entry to", site, base, base + 2 * GfxBufferSize);
+        std::fprintf(stderr, "[kig]   words at 8004A300:");
+        for (uint32_t a = 0x8004A300; a < 0x8004A340; a += 4) {
+            std::fprintf(stderr, " %08X", (uint32_t)MEM_W(0, (gpr)(int32_t)a));
+        }
+        std::fprintf(stderr, "\n[kig]   last head stores (oldest first):");
+        const uint32_t n = gfx_ring_next.load();
+        for (uint32_t i = n > GfxRing ? n - GfxRing : 0; i < n; i++) {
+            const GfxStore& s = gfx_ring[i % GfxRing];
+            std::fprintf(stderr, "%s%08X<-%08X", (i % 6) == 0 ? "\n[kig]    " : " ", s.site, s.value);
+        }
+        RecompShadowStack* ss = recomp_ss_self();
+        std::fprintf(stderr, "\n[kig]   call chain (call sites, outermost first):");
+        for (uint32_t i = 0; i < ss->depth && i < RECOMP_SS_MAX; i++) {
+            std::fprintf(stderr, " %08X", ss->e[i].site);
+        }
+        std::fprintf(stderr, "\n");
+        const std::filesystem::path dump = kig::log::dir() / "ptrcheck-rdram.bin";
+        if (FILE* f = std::fopen(dump.string().c_str(), "wb")) {
+            std::fwrite(rdram, 1, 0x800000, f);
+            std::fclose(f);
+            std::fprintf(stderr, "[kig]   RDRAM saved to %s\n", dump.string().c_str());
+        }
+        kig::crash::dump_all_threads(stderr);
+        kig::log::flush();
+    }
+}
+
+extern "C" void kig_gfx_track(uint8_t* rdram, recomp_context* ctx, uint32_t site, gpr value) {
+    if (!gfx_check_on || (int32_t)ctx->r22 != (int32_t)GfxHead) {
+        return;
+    }
+    const uint32_t i = gfx_ring_next.fetch_add(1);
+    gfx_ring[i % GfxRing] = { site, (uint32_t)value };
+    gfx_validate(rdram, site, (uint32_t)value, true);
+}
+
+extern "C" void kig_gfx_check(uint8_t* rdram, uint32_t site) {
+    if (!gfx_check_on) {
+        return;
+    }
+    gfx_validate(rdram, site, (uint32_t)MEM_W(0, (gpr)(int32_t)GfxHead), false);
 }
 
 // The game's handwritten code reads COP0 Count directly (seg2); same clock as osGetCount. Its fight

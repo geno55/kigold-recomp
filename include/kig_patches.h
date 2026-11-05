@@ -27,6 +27,13 @@ void kig_dp_set_next_buffer(uint8_t* rdram, recomp_context* ctx);
 void kig_dispatch_entity(uint8_t* rdram, recomp_context* ctx);
 void kig_restart_state(uint8_t* rdram, recomp_context* ctx);
 
+// src/game/kig_hooks.cpp: the display list pointer check for #7 (KIG_PTR_CHECK). _track runs before each
+// store of the fight loop's display list head (0x8004A318), with the value stored and the store's
+// address; _check runs on entry to the functions given the head's address. The first bad value is
+// reported with the recent stores, the call chain and an RDRAM dump.
+void kig_gfx_track(uint8_t* rdram, recomp_context* ctx, uint32_t site, gpr value);
+void kig_gfx_check(uint8_t* rdram, uint32_t site);
+
 // src/game/kig_hooks.cpp: `mfc0 rt, Count` in game code (N64Recomp patch in patches/n64recomp/).
 uint32_t recomp_cop0_count(void);
 

@@ -173,6 +173,8 @@ static inline void kig_do_sdr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
 // that list: each function's resume dispatch jumps back into the call it was in.
 // ---------------------------------------------------------------------------------------------
 #define RECOMP_SS_MAX 256
+// A shadow stack entry for a native frame that calls recompiled code (it can't be resumed).
+#define RECOMP_SS_NATIVE_FRAME 0xFFFFFFFFu
 
 typedef struct {
     uint32_t site;

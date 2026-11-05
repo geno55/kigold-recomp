@@ -66,6 +66,26 @@ HOOKS = [
     ("seg2_801AFD44", 0x801AFD64, "kig_dispatch_entity(rdram, ctx); return; /* kig: entity dispatch */"),
     ("seg2_801BE720", 0x801BE74C, "ctx->r6 = ADD32(0, 0X22); kig_restart_state(rdram, ctx); return; /* kig: state restart */"),
     ("seg2_801BE784", 0x801BE790, "MEM_B(0X8C, ctx->r30) = ctx->r7; kig_restart_state(rdram, ctx); return; /* kig: state restart */"),]
+
+# Display list pointer check (#7, src/game/kig_hooks.cpp; does nothing unless KIG_PTR_CHECK is set). The
+# fight loop func_8000FAA0 keeps the display list head at 0x8004A318 ($s6 from 0x8001001C) and stores it
+# at these addresses (register stored); a store in a delay slot is checked before its branch, where the
+# register already holds the value. The functions that take the head's address are checked on entry.
+GFX_HEAD_STORES = [
+    (0x80010048, 25), (0x80010050, 24), (0x8001006C, 15), (0x80010080, 14), (0x800100F0, 24),
+    (0x800103F8, 14), (0x80010694, 24), (0x800106B0, 15), (0x800106C4, 24), (0x80010A60, 2),
+    (0x80010C94, 2), (0x80010CB4, 2), (0x80010CC0, 2), (0x80010D3C, 2), (0x80010D4C, 2),
+    (0x80010DE4, 24), (0x80010E00, 14), (0x80010E20, 25), (0x80010E44, 24), (0x80010E78, 24),
+    (0x80010E98, 15), (0x80010F30, 24), (0x80010F4C, 14), (0x80010F6C, 25), (0x80010F90, 24),
+    (0x80010FAC, 15), (0x800112C4, 14), (0x800112E8, 24), (0x80011304, 14), (0x8001146C, 24),
+    (0x80011474, 25), (0x80011488, 14), (0x8001149C, 15), (0x800114CC, 24), (0x800114D4, 25),
+    (0x800114EC, 15),
+]
+HOOKS += [("func_8000FAA0", vram, f"kig_gfx_track(rdram, ctx, 0x{vram:08X}u, ctx->r{reg}); /* kig: #7 check */")
+          for vram, reg in GFX_HEAD_STORES]
+HOOKS += [(name, vram, f"kig_gfx_check(rdram, 0x{vram:08X}u); /* kig: #7 check */")
+          for name, vram in [("func_8001E0F4", 0x8001E0F4), ("func_8001ECB4", 0x8001ECB4),
+                             ("func_80021BAC", 0x80021BAC), ("func_800131F4", 0x800131F4)]]
 INFLATE_OUTCNT = 0x8000BF7C
 SEGMENTS_HEADER = ROOT / "include" / "kig_segments.h"
 
