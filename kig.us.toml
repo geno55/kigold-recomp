@@ -81,6 +81,206 @@ func = "seg2_801BE784"
 before_vram = 0x801BE790
 text = "MEM_B(0X8C, ctx->r30) = ctx->r7; kig_restart_state(rdram, ctx); return; /* kig: state restart */"
 
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010048
+text = "kig_gfx_track(rdram, ctx, 0x80010048u, ctx->r25); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010050
+text = "kig_gfx_track(rdram, ctx, 0x80010050u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x8001006C
+text = "kig_gfx_track(rdram, ctx, 0x8001006Cu, ctx->r15); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010080
+text = "kig_gfx_track(rdram, ctx, 0x80010080u, ctx->r14); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800100F0
+text = "kig_gfx_track(rdram, ctx, 0x800100F0u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800103F8
+text = "kig_gfx_track(rdram, ctx, 0x800103F8u, ctx->r14); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010694
+text = "kig_gfx_track(rdram, ctx, 0x80010694u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800106B0
+text = "kig_gfx_track(rdram, ctx, 0x800106B0u, ctx->r15); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800106C4
+text = "kig_gfx_track(rdram, ctx, 0x800106C4u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010A60
+text = "kig_gfx_track(rdram, ctx, 0x80010A60u, ctx->r2); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010C94
+text = "kig_gfx_track(rdram, ctx, 0x80010C94u, ctx->r2); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010CB4
+text = "kig_gfx_track(rdram, ctx, 0x80010CB4u, ctx->r2); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010CC0
+text = "kig_gfx_track(rdram, ctx, 0x80010CC0u, ctx->r2); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010D3C
+text = "kig_gfx_track(rdram, ctx, 0x80010D3Cu, ctx->r2); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010D4C
+text = "kig_gfx_track(rdram, ctx, 0x80010D4Cu, ctx->r2); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010DE4
+text = "kig_gfx_track(rdram, ctx, 0x80010DE4u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010E00
+text = "kig_gfx_track(rdram, ctx, 0x80010E00u, ctx->r14); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010E20
+text = "kig_gfx_track(rdram, ctx, 0x80010E20u, ctx->r25); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010E44
+text = "kig_gfx_track(rdram, ctx, 0x80010E44u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010E78
+text = "kig_gfx_track(rdram, ctx, 0x80010E78u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010E98
+text = "kig_gfx_track(rdram, ctx, 0x80010E98u, ctx->r15); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010F30
+text = "kig_gfx_track(rdram, ctx, 0x80010F30u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010F4C
+text = "kig_gfx_track(rdram, ctx, 0x80010F4Cu, ctx->r14); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010F6C
+text = "kig_gfx_track(rdram, ctx, 0x80010F6Cu, ctx->r25); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010F90
+text = "kig_gfx_track(rdram, ctx, 0x80010F90u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80010FAC
+text = "kig_gfx_track(rdram, ctx, 0x80010FACu, ctx->r15); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800112C4
+text = "kig_gfx_track(rdram, ctx, 0x800112C4u, ctx->r14); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800112E8
+text = "kig_gfx_track(rdram, ctx, 0x800112E8u, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80011304
+text = "kig_gfx_track(rdram, ctx, 0x80011304u, ctx->r14); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x8001146C
+text = "kig_gfx_track(rdram, ctx, 0x8001146Cu, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80011474
+text = "kig_gfx_track(rdram, ctx, 0x80011474u, ctx->r25); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x80011488
+text = "kig_gfx_track(rdram, ctx, 0x80011488u, ctx->r14); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x8001149C
+text = "kig_gfx_track(rdram, ctx, 0x8001149Cu, ctx->r15); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800114CC
+text = "kig_gfx_track(rdram, ctx, 0x800114CCu, ctx->r24); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800114D4
+text = "kig_gfx_track(rdram, ctx, 0x800114D4u, ctx->r25); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8000FAA0"
+before_vram = 0x800114EC
+text = "kig_gfx_track(rdram, ctx, 0x800114ECu, ctx->r15); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8001E0F4"
+before_vram = 0x8001E0F4
+text = "kig_gfx_check(rdram, 0x8001E0F4u); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8001ECB4"
+before_vram = 0x8001ECB4
+text = "kig_gfx_check(rdram, 0x8001ECB4u); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_80021BAC"
+before_vram = 0x80021BAC
+text = "kig_gfx_check(rdram, 0x80021BACu); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_800131F4"
+before_vram = 0x800131F4
+text = "kig_gfx_check(rdram, 0x800131F4u); /* kig: #7 check */"
+
 [[patches.instruction]]
 func = "func_8001ED30"
 vram = 0x8001FC8C
