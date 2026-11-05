@@ -235,6 +235,8 @@ add_executable(kig
     ${CMAKE_SOURCE_DIR}/src/game/pi.cpp
     ${CMAKE_SOURCE_DIR}/src/game/input.cpp
     ${CMAKE_SOURCE_DIR}/src/game/kig_hooks.cpp
+    ${CMAKE_SOURCE_DIR}/src/game/savestate.cpp
+    ${CMAKE_SOURCE_DIR}/src/game/savestate_tls.c
     ${CMAKE_SOURCE_DIR}/src/game/steps.cpp
     ${CMAKE_SOURCE_DIR}/src/game/tlb.cpp)
 

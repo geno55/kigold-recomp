@@ -22,6 +22,7 @@ Changes to the runtime are in `patches/runtime/` (applied at configure time). Th
 - 0009: present the current VI state (frames were sometimes shown out of order)
 - 0010: synchronous gfx submission (the title fire texture was read mid-update)
 - 0011: keep RDRAM allocated at exit (crash on quit)
+- 0012: save states (see below)
 
 The N64Recomp changes (handwritten code, VR4300 divide by zero, Count reads, branch labels, `$ra` on
 calls) are in `patches/n64recomp/`.
@@ -62,9 +63,48 @@ Hand decisions live in `syms/overrides.toml`, `syms/libultra_symbols.txt` and `s
 
 ## Command-line options
 
-`build/cmake/kig.exe [--frames N] [--speed N] [--mute] [--hidden] [--data-dir DIR] [--console] [rom]`.
-`--mute` silences the output without changing audio timing; `--hidden` never shows the window and ignores
-gamepads (background test runs).
+`build/cmake/kig.exe [--frames N] [--speed N] [--mute] [--hidden] [--data-dir DIR] [--console]
+[--load-state FILE] [rom]`. `--mute` silences the output without changing audio timing; `--hidden` never
+shows the window and ignores gamepads (background test runs); `--load-state` loads a save state as soon as
+the game is running.
+
+## Save states
+
+F5 saves the quick-save state (`states/quicksave.kigstate` in the app folder) and F7 loads it; step
+scripts use `SAVE_STATE <file> [<addr> <8|16|32> <value>]` and `LOAD_STATE <file>`. The code is in
+`src/game/savestate.cpp`, with N64Recomp patch 0002 and runtime patch 0012.
+
+The difficulty is that each game thread runs as native code, so where a thread is lives in the host's
+call stack. Three things make it possible:
+
+- **Shadow call stack.** Every recompiled call site pushes its address (and, for an indirect call, the
+  callee) onto a per-thread shadow stack (`RECOMP_SS_PUSH`/`POP`, `include/recomp.h`).
+- **Resume dispatch.** Every function starts with a check that, while its thread is being restored,
+  jumps to a dispatch at its end. The dispatch goes back into the call the function was in.
+- **Safe point.** ultramodern runs one game thread at a time, so at the top of the idle thread's loop
+  every other thread is blocked in the scheduler. A request waits for a moment when every other thread
+  is blocked in a message queue wait and no RSP task is running. A thread blocked in a queue can be
+  resumed by making the same OS call again: it rechecks the queue, as its wait loop does.
+
+To load, the idle thread ends every other game thread, then restores everything below and starts each
+saved thread again. The thread rebuilds its chain from its entry function down to the blocked OS call
+and waits there until the scheduler runs it.
+
+A state holds:
+
+- RDRAM;
+- each thread's `recomp_context` and shadow stack;
+- the scheduler's running queue, event registrations and VI state;
+- the TLB;
+- the loaded code segments (librecomp's sections and kig's overlay list);
+- the seeded Count sequence.
+
+A state taken at a frame counter and reloaded in a fresh process reproduces the same game state at
+later frames. The only differences are wall-clock values such as the timestamp at 0x80066B78.
+
+Not covered: the audio already queued to the sound device, and RT64's GPU copies of framebuffers (the
+next frame redraws them). States depend on the recompiled code's call sites, so they only load in the
+build that wrote them.
 
 ## Differential testing against a reference emulator
 
@@ -77,7 +117,8 @@ A scenario's `steps` (tests/scenarios/*.toml) drive both sides with the same scr
 (`WAIT_RAM`) instead of times, since gameplay drifts from run to run. The language is documented in
 `tools/refemu.py`; kig.exe runs it with `KIG_STEPS` (src/game/steps.cpp), one step tick per VI on both
 sides. `WRITE_RAM` pins values at a synced point (KIG_POKE's job), `DUMP_RAM` writes all of RDRAM
-big-endian, and `SAVE_STATE`/`LOAD_STATE` (reference only) jump straight to any point. Saves are portable:
+big-endian, and `SAVE_STATE`/`LOAD_STATE` jump straight to any point (core snapshots on the reference,
+kig save states on kig; the two kinds of file don't mix). Saves are portable:
 `--eeprom-in/--eeprom-out` use kig's `saves/kig.us.bin`, and `--pak-in/--pak-out` kig's Controller Pak
 folder (`tools/pak_convert.py` converts to and from a 32 KB pak image).
 

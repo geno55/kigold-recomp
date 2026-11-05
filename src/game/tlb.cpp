@@ -8,6 +8,7 @@
 #include <mutex>
 
 #include "recomp.h"
+#include "kig_savestate.h"
 
 extern "C" int32_t kig_tlb_page[KIG_TLB_PAGES];
 int32_t kig_tlb_page[KIG_TLB_PAGES];
@@ -82,4 +83,30 @@ extern "C" void __osProbeTLB_recomp(uint8_t* rdram, recomp_context* ctx) {
     uint32_t v = (uint32_t)ctx->r4;
     int32_t p = v < KIG_TLB_SPAN ? kig_tlb_page[v >> 12] : -1;
     ctx->r2 = p < 0 ? (gpr)(int32_t)-1 : (gpr)(int32_t)((uint32_t)p | (v & 0xFFF));
+}
+
+// Save states (src/game/savestate.cpp).
+std::vector<kig::savestate_hooks::TlbEntry> kig::savestate_hooks::get_tlb() {
+    std::lock_guard lock{ tlb_mutex };
+    std::vector<TlbEntry> out;
+    for (const Entry& e : entries) {
+        out.push_back({ e.valid ? 1u : 0u, e.vaddr, e.page_size, e.even, e.odd });
+    }
+    return out;
+}
+
+void kig::savestate_hooks::set_tlb(const std::vector<TlbEntry>& saved) {
+    std::lock_guard lock{ tlb_mutex };
+    for (size_t i = 0; i < entries.size(); i++) {
+        Entry e;
+        if (i < saved.size()) {
+            e.valid = saved[i].valid != 0;
+            e.vaddr = saved[i].vaddr;
+            e.page_size = saved[i].page_size;
+            e.even = saved[i].even;
+            e.odd = saved[i].odd;
+        }
+        entries[i] = e;
+    }
+    rebuild();
 }

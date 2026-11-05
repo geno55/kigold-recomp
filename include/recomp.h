@@ -166,4 +166,74 @@ static inline void kig_do_sdr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
 #define do_sdl kig_do_sdl
 #define do_sdr kig_do_sdr
 
+// ---------------------------------------------------------------------------------------------
+// Resumable calls, for save states (src/game/savestate.cpp; N64Recomp patch 0002 emits these).
+// Each game thread keeps a shadow stack of the call sites it is in: the vram of each call instruction
+// and, for an indirect call, the callee's vram. Restoring a thread rebuilds its native call chain from
+// that list: each function's resume dispatch jumps back into the call it was in.
+// ---------------------------------------------------------------------------------------------
+#define RECOMP_SS_MAX 256
+
+typedef struct {
+    uint32_t site;
+    uint32_t target;
+} RecompSSEntry;
+
+typedef struct {
+    uint32_t depth;           // frames on the stack (entries beyond RECOMP_SS_MAX aren't kept)
+    uint32_t resume_pos;      // while resuming: the next entry to re-enter
+    uint32_t resume_len;      // nonzero while this thread is being resumed
+    uint32_t target_pending;  // the next indirect call takes `target` instead of its register
+    uint32_t target;
+    RecompSSEntry e[RECOMP_SS_MAX];
+} RecompShadowStack;
+
+#if defined(_MSC_VER)
+#define RECOMP_TLS __declspec(thread)
+#else
+#define RECOMP_TLS _Thread_local
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern volatile int recomp_resume_active;        // some thread is being resumed
+RecompShadowStack* recomp_ss_self(void);         // this thread's (src/game/savestate_tls.c)
+uint32_t recomp_resume_enter(uint8_t* rdram, recomp_context* ctx, uint32_t func_vram);
+void recomp_resume_fail(uint8_t* rdram, recomp_context* ctx, uint32_t func_vram);
+#ifdef __cplusplus
+}
+#endif
+
+// The rest is for the recompiled C code, which reads the TLS variable directly (C++ code uses
+// recomp_ss_self()).
+#ifndef __cplusplus
+extern RECOMP_TLS RecompShadowStack recomp_ss;
+
+#if defined(__GNUC__) || defined(__clang__)
+#define RECOMP_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define RECOMP_UNLIKELY(x) (x)
+#endif
+
+#define RECOMP_SS_PUSH(site_, target_) do { \
+    RecompShadowStack* ss_ = &recomp_ss; \
+    uint32_t d_ = ss_->depth++; \
+    if (d_ < RECOMP_SS_MAX) { ss_->e[d_].site = (site_); ss_->e[d_].target = (uint32_t)(target_); } \
+} while (0)
+
+#define RECOMP_SS_POP() (recomp_ss.depth--)
+
+#define RECOMP_RESUMING() (RECOMP_UNLIKELY(recomp_resume_active) && recomp_ss.resume_len != 0)
+
+static inline gpr recomp_resume_take_target(void) {
+    recomp_ss.target_pending = 0;
+    return (gpr)(int32_t)recomp_ss.target;
+}
+// The callee of an indirect call: x, unless the call is being resumed (then x isn't evaluated: it may
+// read a variable the resume jump skipped).
+#define RECOMP_RESUME_TARGET(x) \
+    ((RECOMP_UNLIKELY(recomp_resume_active) && recomp_ss.target_pending) ? recomp_resume_take_target() : (gpr)(x))
+#endif  // !__cplusplus
+
 #endif

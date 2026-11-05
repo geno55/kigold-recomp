@@ -25,8 +25,11 @@ namespace kig::ui {
     void handle_event(const SDL_Event& event);
     void update();
 
-    // True while the launcher or the menu is on screen (the renderer then presents every VI).
+    // True while the launcher, the menu or a toast is on screen (the renderer then presents every VI).
     bool visible();
+
+    // A short message in a corner of the screen for a few seconds (main thread), e.g. "State saved".
+    void toast(const std::string& text, bool error = false);
 
     // ui_render.cpp <-> ui.cpp: ImGui state is touched under this mutex; frames are built only once
     // the render backend exists.

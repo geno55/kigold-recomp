@@ -99,10 +99,11 @@ If you open a new terminal later, return to the project directory and **activate
 
 These programs translate N64 machine code and audio microcode into code the Linux compiler can build.
 
-First, apply the project's supplied patch. This is part of the normal setup and is **not** a change to submit separately to the N64Recomp submodule:
+First, apply the project's supplied patches, in order. This is part of the normal setup and is **not** a change to submit separately to the N64Recomp submodule:
 
 ```sh
 git -C lib/N64Recomp apply ../../patches/n64recomp/0001-handwritten-code.patch
+git -C lib/N64Recomp apply ../../patches/n64recomp/0002-resumable-calls.patch
 ```
 
 Then configure and build them:

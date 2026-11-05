@@ -30,6 +30,10 @@ Run `kig.exe`. The first time, it asks you to pick your game file. You can also 
 
 Your settings and save data are kept in `%APPDATA%\KIGRecomp`.
 
+Press **F5** to save a state at the current moment and **F7** to load it again (one quick-save slot, kept
+in `%APPDATA%\KIGRecomp\states`). This is meant for testing and reproducing bugs: a state belongs to the
+build that made it and may not load in other versions.
+
 ## Building it yourself
 
 You'll need Visual Studio 2022 Build Tools (with clang-cl and the Windows SDK), CMake 3.20 or newer, Ninja,
@@ -40,6 +44,7 @@ Git Bash):
 ```
 git submodule update --init --recursive
 git -C lib/N64Recomp apply ../../patches/n64recomp/0001-handwritten-code.patch
+git -C lib/N64Recomp apply ../../patches/n64recomp/0002-resumable-calls.patch
 cmake -S lib/N64Recomp -B lib/N64Recomp/build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build lib/N64Recomp/build --target N64RecompCLI RSPRecomp
 tools\regen_syms.ps1
@@ -75,6 +80,7 @@ python -m venv .venv
 python -m pip install rabbitizer xxhash 'splat64[mips]' spimdisasm
 
 git -C lib/N64Recomp apply ../../patches/n64recomp/0001-handwritten-code.patch
+git -C lib/N64Recomp apply ../../patches/n64recomp/0002-resumable-calls.patch
 cmake -S lib/N64Recomp -B lib/N64Recomp/build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 cmake --build lib/N64Recomp/build --target N64RecompCLI RSPRecomp --parallel

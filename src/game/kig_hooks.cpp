@@ -20,6 +20,7 @@
 #include "kig_input.h"
 #include "kig_patches.h"
 #include "kig_segments.h"
+#include "kig_savestate.h"
 
 // ---------------------------------------------------------------------------------------------
 // Code segments. KI Gold's code is deflate-compressed in the ROM (docs/rom_map.md). The game DMAs a
@@ -209,18 +210,48 @@ extern "C" void kig_restart_state(uint8_t* rdram, recomp_context* ctx) {
 // host timing. KIG_COUNT_SEED=<n> (testing) makes those reads a fixed sequence instead, so a seed
 // replays the same fights.
 extern "C" u32 osGetCount();
+namespace {
+    const char* count_seed_env = std::getenv("KIG_COUNT_SEED");
+    std::atomic<uint32_t> count_state{ count_seed_env ? (uint32_t)std::strtoul(count_seed_env, nullptr, 0) * 2654435761u + 1 : 0u };
+}
 extern "C" uint32_t recomp_cop0_count(void) {
-    static const char* seed_env = std::getenv("KIG_COUNT_SEED");
-    if (seed_env == nullptr) {
+    if (count_seed_env == nullptr) {
         return osGetCount();
     }
-    static std::atomic<uint32_t> state{ (uint32_t)std::strtoul(seed_env, nullptr, 0) * 2654435761u + 1 };
-    uint32_t x = state.load(std::memory_order_relaxed);
+    uint32_t x = count_state.load(std::memory_order_relaxed);
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
-    state.store(x, std::memory_order_relaxed);
+    count_state.store(x, std::memory_order_relaxed);
     return x;
+}
+
+// Save states (src/game/savestate.cpp): the seeded Count sequence and the loaded code segments.
+uint32_t kig::savestate_hooks::get_count_state() {
+    return count_state.load();
+}
+
+void kig::savestate_hooks::set_count_state(uint32_t state) {
+    if (count_seed_env != nullptr) {
+        count_state.store(state);
+    }
+}
+
+std::vector<kig::savestate_hooks::Overlay> kig::savestate_hooks::get_overlays() {
+    std::lock_guard lock{ overlay_mutex };
+    std::vector<Overlay> out;
+    for (const LoadedOverlay& o : loaded_overlays) {
+        out.push_back({ o.ram, o.size, o.name });
+    }
+    return out;
+}
+
+void kig::savestate_hooks::set_overlays(const std::vector<Overlay>& overlays) {
+    std::lock_guard lock{ overlay_mutex };
+    loaded_overlays.clear();
+    for (const Overlay& o : overlays) {
+        loaded_overlays.push_back({ o.ram, o.size, o.name });
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

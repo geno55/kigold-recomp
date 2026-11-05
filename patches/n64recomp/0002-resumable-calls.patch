@@ -1,0 +1,160 @@
+diff --git a/src/recompilation.cpp b/src/recompilation.cpp
+index 1e08b3a..ce1a4fd 100644
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -13,6 +13,50 @@
+ #include "recompiler/operations.h"
+ #include "recompiler/generator.h"
+ 
++// Resumable calls (save states). Every call site is emitted as
++//     resume_<site>: RECOMP_SS_PUSH(<site>, <target>); <call>; RECOMP_SS_POP();
++// so the runtime keeps a shadow stack of the call sites each thread is in, and each function ends with a
++// dispatch (reached from its start while RECOMP_RESUMING()) that jumps back into the call it was in. The
++// runtime defines the macros and recomp_resume_enter(), which returns the site to re-enter, or the site
++// | 1 to return from that call instead (to its after_ label, or out of the function for a tail call).
++// <site> is the vram of the call instruction, unique within the function.
++namespace {
++    struct ResumeSite {
++        uint32_t site;
++        int after_index;  // after_<n> label, or -1 for a tail call
++    };
++    thread_local std::vector<ResumeSite> resume_sites;
++    thread_local std::set<uint32_t> resume_site_set;
++
++    // The resume label for a call site (none if the site already has one: then it can't be resumed).
++    void emit_resume_label(std::ostream& output_file, uint32_t site, int after_index) {
++        if (resume_site_set.insert(site).second) {
++            resume_sites.push_back({ site, after_index });
++            fmt::print(output_file, "resume_{:08X}: ", site);
++        }
++    }
++
++    // Label and push before a direct call.
++    void emit_resume_begin(std::ostream& output_file, uint32_t site, int after_index) {
++        emit_resume_label(output_file, site, after_index);
++        fmt::print(output_file, "RECOMP_SS_PUSH(0x{:08X}u, 0);\n    ", site);
++    }
++
++    void emit_resume_end(std::ostream& output_file) {
++        fmt::print(output_file, "    RECOMP_SS_POP();\n");
++    }
++
++    // An indirect call through `expr` (a gpr expression). The target is recorded on the shadow stack and
++    // taken from there when the call is being resumed (the register may no longer hold it).
++    void emit_resumable_indirect_call(std::ostream& output_file, uint32_t site, int after_index, const std::string& expr) {
++        emit_resume_label(output_file, site, after_index);
++        fmt::print(output_file, "{{ gpr rt_ = RECOMP_RESUME_TARGET({}); RECOMP_SS_PUSH(0x{:08X}u, rt_);\n", expr, site);
++        fmt::print(output_file, "    LOOKUP_FUNC(rt_)(rdram, ctx);\n");
++        emit_resume_end(output_file);
++        fmt::print(output_file, "    }}\n");
++    }
++}
++
+ enum class JalResolutionResult {
+     NoMatch,
+     Match,
+@@ -249,17 +293,18 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+         return true;
+     };
+ 
+-    auto print_func_call_by_register = [&](int reg) {
++    // tail_call: a jr through a register (the caller emits the return); otherwise a jalr.
++    auto print_func_call_by_register = [&](int reg, bool tail_call = false) {
+         if (!process_delay_slot(false)) {
+             return false;
+         }
+         print_indent();
+-        generator.emit_function_call_by_register(reg);
++        emit_resumable_indirect_call(output_file, instr_vram, tail_call ? -1 : link_branch_index, fmt::format("ctx->r{}", reg));
+         print_link_branch();
+         return true;
+     };
+ 
+-    auto print_func_call_by_address = [&generator, reloc_target_section_offset, has_reloc, reloc_section, reloc_reference_symbol, reloc_type, &context, &func, &static_funcs_out, &needs_link_branch, &print_indent, &process_delay_slot, &print_link_branch]
++    auto print_func_call_by_address = [&generator, reloc_target_section_offset, has_reloc, reloc_section, reloc_reference_symbol, reloc_type, &context, &func, &static_funcs_out, &needs_link_branch, &print_indent, &process_delay_slot, &print_link_branch, &output_file, instr_vram, link_branch_index]
+         (uint32_t target_func_vram, bool tail_call = false, bool indent = false)
+     {
+         bool call_by_lookup = false;
+@@ -339,6 +384,7 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+                 return false;
+             }
+             print_indent();
++            emit_resume_begin(output_file, instr_vram, tail_call ? -1 : link_branch_index);
+             if (reloc_reference_symbol != (size_t)-1) {
+                 generator.emit_function_call_reference_symbol(context, reloc_section, reloc_reference_symbol, reloc_target_section_offset);
+             }
+@@ -351,6 +397,7 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+             else {
+                 generator.emit_function_call(context, matched_func_index);
+             }
++            emit_resume_end(output_file);
+             print_link_branch();
+         }
+         return true;
+@@ -564,15 +611,19 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+                 // Handwritten tables mix entries in this function with other functions' entry points, and the
+                 // table size is only known up to the first outside entry: anything else is an indirect tail call.
+                 // (The table's lw is not emitted for a switch, so load the entry here.)
+-                fmt::print(output_file, "default: LOOKUP_FUNC(MEM_W((int32_t)jr_addend_{:08X}, (gpr)(int32_t)0x{:08X}u))(rdram, ctx); return;\n",
+-                    cur_jtbl.jr_vram, cur_jtbl.vram);
++                fmt::print(output_file, "default:\n    ");
++                emit_resumable_indirect_call(output_file, instr_vram, -1,
++                    fmt::format("MEM_W((int32_t)jr_addend_{:08X}, (gpr)(int32_t)0x{:08X}u)", cur_jtbl.jr_vram, cur_jtbl.vram));
++                print_indent();
++                print_indent();
++                generator.emit_return(context, func_index);
+                 print_indent();
+                 generator.emit_switch_close();
+                 break;
+             }
+ 
+             fmt::print("[Info] Indirect tail call in {}\n", func.name);
+-            print_func_call_by_register(rs);
++            print_func_call_by_register(rs, true);
+             print_indent();
+             generator.emit_return(context, func_index);
+             break;
+@@ -785,6 +836,14 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+ 
+     generator.emit_function_start(func.name, func_index);
+ 
++    // Resumable calls (see ResumeSite): before the entry hooks, which already ran when the function was
++    // first entered.
++    resume_sites.clear();
++    resume_site_set.clear();
++    if (!func.stubbed) {
++        fmt::print(output_file, "    if (RECOMP_RESUMING()) goto resume_dispatch;\n");
++    }
++
+     if (context.trace_mode) {
+         fmt::print(output_file,
+             "    TRACE_ENTRY()\n",
+@@ -922,7 +981,9 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+                 fmt::print("[Info] Fall-through tail call in {} to {}\n", func.name, context.functions[next_index].name);
+                 fmt::print(output_file, "    // fall-through into the next function\n");
+                 fmt::print(output_file, "    ");
++                emit_resume_begin(output_file, end_vram, -1);  // (no instruction there in this function)
+                 generator.emit_function_call(context, next_index);
++                emit_resume_end(output_file);
+                 fmt::print(output_file, "    ");
+                 generator.emit_return(context, func_index);
+             }
+@@ -930,6 +991,18 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+                 fmt::print(stderr, "[Warn] Function {} can fall through its end (0x{:08X}) and no function starts there\n", func.name, end_vram);
+             }
+         }
++
++        // The resume dispatch: re-enter the call this function was in, or return from it.
++        fmt::print(output_file, "resume_dispatch:\n    switch (recomp_resume_enter(rdram, ctx, 0x{:08X}u)) {{\n", func.vram);
++        for (const ResumeSite& s : resume_sites) {
++            fmt::print(output_file, "    case 0x{:08X}u: goto resume_{:08X};\n", s.site, s.site);
++            if (s.after_index >= 0) {
++                fmt::print(output_file, "    case 0x{:08X}u: goto after_{};\n", s.site | 1, s.after_index);
++            } else {
++                fmt::print(output_file, "    case 0x{:08X}u: return;\n", s.site | 1);
++            }
++        }
++        fmt::print(output_file, "    default: recomp_resume_fail(rdram, ctx, 0x{:08X}u); return;\n    }}\n", func.vram);
+     }
+ 
+     // Terminate the function

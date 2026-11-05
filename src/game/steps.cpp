@@ -5,8 +5,8 @@
 // lined up with the reference's log step by step.
 //
 // RAM addresses are KSEG0/KSEG1 (0x80000000.../0xA0000000...); RDRAM is 8 MB. DUMP_RAM writes all of it
-// big-endian, the reference's layout. SAVE_STATE/LOAD_STATE only exist on the reference: here they are
-// skipped with a log line.
+// big-endian, the reference's layout. SAVE_STATE/LOAD_STATE are kig save states here (core snapshots on
+// the reference; the two kinds of file don't mix).
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -21,6 +21,7 @@
 #include "kig_capture.h"
 #include "kig_input.h"
 #include "kig_steps.h"
+#include "kig_savestate.h"
 
 namespace {
     constexpr uint32_t RdramSize = 0x800000;
@@ -45,6 +46,8 @@ namespace {
     uint64_t wait_until = 0;
     uint64_t wait_ram_since = 0;  // VI the current WAIT_RAM started at (timeouts)
     uint64_t end_vi = 0;          // VI the script finishes at, once its last step has run
+    bool state_pending = false;   // a SAVE_STATE/LOAD_STATE step is waiting for its result
+    uint64_t state_serial = 0;
     uint8_t* rdram = nullptr;
     std::filesystem::path out_dir = ".";
     std::atomic<bool> finished{ false };
@@ -181,6 +184,45 @@ namespace {
                 pc++;
                 continue;
             }
+            if (s.op == "SAVE_STATE" || s.op == "LOAD_STATE") {
+                // SAVE_STATE <file> [<addr> <8|16|32> <value>] / LOAD_STATE <file> (relative: in
+                // KIG_CAPTURE_DIR): blocks until the state is saved or loaded, at the game's next safe
+                // point (src/game/savestate.cpp); with a condition, the first one where the RAM value
+                // equals value (e.g. a frame counter, so two runs save at the same game frame).
+                const bool save = s.op == "SAVE_STATE";
+                if (!(a.size() == 1 || (save && a.size() == 4))) {
+                    return fail(s, save ? "usage: SAVE_STATE <file> [<addr> <8|16|32> <value>]" : "usage: LOAD_STATE <file>");
+                }
+                std::filesystem::path path = a[0];
+                if (path.is_relative()) path = out_dir / path;
+                if (!state_pending) {
+                    log();
+                    state_serial = kig::savestate::last_result().serial;
+                    if (save) {
+                        kig::savestate::SaveCondition cond;
+                        if (a.size() == 4) {
+                            cond.addr = parse_addr(a[1]);
+                            cond.bits = std::atoi(a[2].c_str());
+                            cond.value = parse_u32(a[3]);
+                            uint32_t p;
+                            if ((cond.bits != 8 && cond.bits != 16 && cond.bits != 32) || !phys(cond.addr, cond.bits / 8, p)) {
+                                return fail(s, "bad address or width");
+                            }
+                        }
+                        kig::savestate::request_save(path, cond);
+                    } else {
+                        std::string err;
+                        if (!kig::savestate::request_load(path, &err)) return fail(s, err);
+                    }
+                    state_pending = true;
+                }
+                const kig::savestate::Result r = kig::savestate::last_result();
+                if (r.serial == state_serial) return;
+                state_pending = false;
+                if (!r.ok) return fail(s, r.message);
+                pc++;
+                continue;
+            }
             log();
             if (s.op == "PRESS" || s.op == "HOLD") {
                 int port;
@@ -210,8 +252,6 @@ namespace {
             } else if (s.op == "LOAD_RAM") {
                 std::string why;
                 if (!load_ram(a, why)) return fail(s, why);
-            } else if (s.op == "SAVE_STATE" || s.op == "LOAD_STATE") {
-                std::fprintf(stderr, "[kig] step line %d: %s skipped (reference emulator only)\n", s.line, s.op.c_str());
             } else if (s.op == "EXIT") {
                 result = a.empty() ? 0 : std::atoi(a[0].c_str());
                 finished = true;

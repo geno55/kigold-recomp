@@ -5,7 +5,8 @@
 // lookup). The launcher and settings menu are this project's own (src/main/ui.cpp, Dear ImGui): the game
 // starts from the launcher, or right away in --frames test runs.
 //
-// Usage: kig.exe [--frames N] [--speed N] [--mute] [--hidden] [--data-dir DIR] [--console] [path/to/rom.{z64,v64,n64}]
+// Usage: kig.exe [--frames N] [--speed N] [--mute] [--hidden] [--data-dir DIR] [--console] [--load-state FILE]
+//                [path/to/rom.{z64,v64,n64}]
 #include <array>
 #include <atomic>
 #include <cinttypes>
@@ -42,6 +43,7 @@
 #include "kig_input.h"
 #include "kig_log.h"
 #include "kig_render.h"
+#include "kig_savestate.h"
 #include "kig_stats.h"
 #include "kig_steps.h"
 #include "kig_trace.h"
@@ -165,9 +167,24 @@ static void update_gfx(void*) {
             if (key == SDLK_F11 || (key == SDLK_RETURN && (event.key.keysym.mod & KMOD_ALT))) {
                 kig::config::toggle_fullscreen();
             }
+            // F5 / F7: save and load the quick-save state (src/game/savestate.cpp).
+            if (key == SDLK_F5 && ultramodern::is_game_started()) {
+                kig::savestate::request_save(kig::savestate::slot_path());
+            } else if (key == SDLK_F7 && ultramodern::is_game_started()) {
+                kig::savestate::request_load(kig::savestate::slot_path());
+            }
         }
         kig::ui::handle_event(event);
         kig::input::handle_event(event);
+    }
+    // Save state results (F5/F7, --load-state) as a toast; not in step scripts, whose screenshots it would
+    // show in.
+    static uint64_t state_serial = 0;
+    const kig::savestate::Result state_result = kig::savestate::last_result();
+    if (state_result.serial != state_serial && !kig::steps::active()) {
+        state_serial = state_result.serial;
+        kig::ui::toast(state_result.ok ? (state_result.was_load ? "State loaded" : "State saved") : "Save state: " + state_result.message,
+                       !state_result.ok);
     }
     kig::ui::update();
     kig::input::update();
@@ -468,6 +485,8 @@ gpr get_entrypoint_address();
 //   --data-dir DIR  config/save/ROM-store folder instead of %APPDATA%\KIGRecomp (keeps tests off real saves)
 //   --console       also show the output in a console (the GUI build has none). Output always goes
 //                   to <app folder>/logs/kig.log, and to stdout/stderr when a parent redirects them.
+//   --load-state F  load the save state F as soon as the game is running (F5 saves to
+//                   <app folder>/states/quicksave.kigstate, F7 loads it)
 
 // ---------------------------------------------------------------------------------------------
 // ROM selection: command line, else the stored copy, else a file picker on first run.
@@ -533,6 +552,7 @@ static std::filesystem::path app_folder_path() {
 int main(int argc, char** argv) {
     std::string rom_arg;
     bool want_console = false;
+    std::filesystem::path load_state_arg;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--frames" && i + 1 < argc) {
@@ -547,8 +567,10 @@ int main(int argc, char** argv) {
             hidden = true;
         } else if (arg == "--console") {
             want_console = true;
+        } else if (arg == "--load-state" && i + 1 < argc) {
+            load_state_arg = std::filesystem::absolute(argv[++i]);
         } else if (arg.rfind("--", 0) == 0) {
-            exit_error("Unknown option: " + arg + "\nUsage: kig.exe [--frames N] [--speed N] [--mute] [--hidden] [--data-dir DIR] [--console] [rom]");
+            exit_error("Unknown option: " + arg + "\nUsage: kig.exe [--frames N] [--speed N] [--mute] [--hidden] [--data-dir DIR] [--console] [--load-state FILE] [rom]");
         } else {
             rom_arg = arg;
         }
@@ -587,6 +609,7 @@ int main(int argc, char** argv) {
     game.is_enabled = true;
     game.entrypoint_address = get_entrypoint_address();
     game.entrypoint = recomp_entrypoint;
+    game.thread_create_callback = kig::savestate::on_thread_create;
     recomp::register_game(game);
 
     kig::register_overlays();
@@ -634,6 +657,14 @@ int main(int argc, char** argv) {
         kig::capture::on_vi();
     } };
     kig::steps::init();
+    kig::savestate::install();
+    kig::savestate::set_slot_dir(config_path / "states");
+    if (!load_state_arg.empty()) {
+        std::string err;
+        if (!kig::savestate::request_load(load_state_arg, &err)) {
+            exit_error("Can't load " + load_state_arg.string() + ": " + err);
+        }
+    }
     if (speed > 1) {
         ultramodern::set_speed_multiplier(speed);
         fprintf(stderr, "[kig] speed: %ux real time, audio muted\n", speed);

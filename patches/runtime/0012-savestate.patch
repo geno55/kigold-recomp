@@ -1,0 +1,515 @@
+diff --git a/librecomp/include/librecomp/overlays.hpp b/librecomp/include/librecomp/overlays.hpp
+index 35703bd..854e088 100644
+--- a/librecomp/include/librecomp/overlays.hpp
++++ b/librecomp/include/librecomp/overlays.hpp
+@@ -1,6 +1,7 @@
+ #ifndef __RECOMP_OVERLAYS_H__
+ #define __RECOMP_OVERLAYS_H__
+ 
++#include <vector>
+ #include <cstdint>
+ #include <cstddef>
+ #include <string>
+@@ -32,6 +33,15 @@ namespace recomp {
+         void read_patch_data(uint8_t* rdram, gpr patch_data_address);
+ 
+         void init_overlays();
++
++        // kig (patch 0012): save states. The loaded code sections (section table index, load address), and
++        // replacing them with a saved list.
++        struct LoadedSectionSave {
++            uint32_t section_table_index;
++            int32_t ram;
++        };
++        std::vector<LoadedSectionSave> get_loaded_sections();
++        void set_loaded_sections(const std::vector<LoadedSectionSave>& sections);
+         const std::unordered_map<uint32_t, uint16_t>& get_vrom_to_section_map();
+         uint32_t get_section_ram_addr(uint16_t code_section_index);
+         std::span<const RelocEntry> get_section_relocs(uint16_t code_section_index);
+diff --git a/librecomp/src/overlays.cpp b/librecomp/src/overlays.cpp
+index 8c8e5d1..8c58224 100644
+--- a/librecomp/src/overlays.cpp
++++ b/librecomp/src/overlays.cpp
+@@ -271,6 +271,29 @@ extern "C" void unload_overlays(int32_t ram_addr, uint32_t size) {
+     }
+ }
+ 
++// kig (patch 0012): save states.
++std::vector<recomp::overlays::LoadedSectionSave> recomp::overlays::get_loaded_sections() {
++    std::vector<LoadedSectionSave> out;
++    for (const LoadedSection& s : loaded_sections) {
++        out.push_back({ (uint32_t)s.section_table_index, s.loaded_ram_addr });
++    }
++    return out;
++}
++
++void recomp::overlays::set_loaded_sections(const std::vector<LoadedSectionSave>& sections) {
++    for (const LoadedSection& loaded : loaded_sections) {
++        const SectionTableEntry& section = sections_info.code_sections[loaded.section_table_index];
++        for (size_t func_index = 0; func_index < section.num_funcs; func_index++) {
++            func_map.erase(section.funcs[func_index].offset + loaded.loaded_ram_addr);
++        }
++        section_addresses[section.index] = section.ram_addr;
++    }
++    loaded_sections.clear();
++    for (const LoadedSectionSave& s : sections) {
++        load_overlay(s.section_table_index, s.ram);
++    }
++}
++
+ void recomp::overlays::init_overlays() {
+     func_map.clear();
+     section_addresses = (int32_t *)calloc(sections_info.total_num_sections, sizeof(int32_t));
+diff --git a/ultramodern/include/ultramodern/savestate.hpp b/ultramodern/include/ultramodern/savestate.hpp
+new file mode 100644
+index 0000000..f92e7d8
+--- /dev/null
++++ b/ultramodern/include/ultramodern/savestate.hpp
+@@ -0,0 +1,67 @@
++#ifndef __ULTRAMODERN_SAVESTATE_HPP__
++#define __ULTRAMODERN_SAVESTATE_HPP__
++
++// kig (patch 0012): what a save state needs from ultramodern. The game thread that runs the idle loop
++// (pause_self) saves and loads at the top of that loop, when every other game thread is blocked in the
++// scheduler; the game provides the rest (RDRAM, each thread's registers and native call chain).
++#include <cstdint>
++#include <vector>
++
++#include "ultramodern/ultra64.h"
++
++struct UltraThreadContext;
++
++namespace ultramodern::savestate {
++    // Called by the idle thread at the top of its loop, with every other game thread blocked.
++    using idle_hook_t = void(uint8_t* rdram);
++    void set_idle_hook(idle_hook_t* hook);
++
++    // Runs a thread restored from a save state (UltraThreadContext::resume set), on that thread, in
++    // place of the thread's entrypoint.
++    using resume_thread_t = void(uint8_t* rdram, UltraThreadContext* context);
++    void set_resume_thread(resume_thread_t* func);
++
++    void run_idle_hook(uint8_t* rdram);  // (from pause_self)
++
++    UltraThreadContext* this_thread_context(uint8_t* rdram);
++    // Every live game thread's context (a copy of the list).
++    std::vector<UltraThreadContext*> live_threads();
++
++    // No RSP (graphics or audio) task in flight.
++    bool rsp_idle();
++    bool external_queue_empty();
++    void discard_external_messages();
++
++    PTR(OSThread) get_running_queue();
++    void set_running_queue(PTR(OSThread) head);
++
++    struct ViSave {
++        uint32_t mode;  // RDRAM address of the OSViMode, 0 for none, 1 for the pre-game dummy mode
++        PTR(void) framebuffer;
++        PTR(OSMesg) mq;
++        OSMesg msg;
++        uint32_t state;
++        uint32_t control;
++        int32_t retrace_count;
++    };
++    struct EventSave {
++        PTR(OSMesgQueue) sp_mq, dp_mq, ai_mq, si_mq;
++        OSMesg sp_msg, dp_msg, ai_msg, si_msg;
++        int32_t vi_cur_state;
++        int32_t vi_field;
++        ViSave vi[2];
++    };
++    EventSave get_events(uint8_t* rdram);
++    void set_events(uint8_t* rdram, const EventSave& save);
++
++    // Ends every game thread but the calling one (each must be blocked in the scheduler) and waits until
++    // they have exited. False if one didn't within a few seconds.
++    bool terminate_other_threads(uint8_t* rdram);
++    // Creates the host thread for the OSThread at t (whose RDRAM state is already in place). With
++    // resume, it runs the resume function; without, it waits to be started like a new thread.
++    UltraThreadContext* create_restored_thread(uint8_t* rdram, PTR(OSThread) t, PTR(void) entrypoint, PTR(void) arg, const void* resume);
++    // A restored thread that has rebuilt its call chain: blocks until the scheduler runs it.
++    void park_self(uint8_t* rdram);
++}
++
++#endif
+diff --git a/ultramodern/include/ultramodern/ultramodern.hpp b/ultramodern/include/ultramodern/ultramodern.hpp
+index 81df5af..1f49ca3 100644
+--- a/ultramodern/include/ultramodern/ultramodern.hpp
++++ b/ultramodern/include/ultramodern/ultramodern.hpp
+@@ -1,6 +1,7 @@
+ #ifndef __ultramodern_HPP__
+ #define __ultramodern_HPP__
+ 
++#include <atomic>
+ #include <thread>
+ #include <cassert>
+ #include <stdexcept>
+@@ -25,6 +26,15 @@ struct UltraThreadContext {
+     std::thread host_thread;
+     moodycamel::LightweightSemaphore running;
+     moodycamel::LightweightSemaphore initialized;
++    // kig (patch 0012, save states; ultramodern/savestate.hpp).
++    PTR(OSThread) thread = NULLPTR;
++    PTR(void) entrypoint = NULLPTR;
++    PTR(void) arg = NULLPTR;
++    std::atomic<bool> started{ false };
++    // 1 while blocked in a message queue wait that resumes by calling the OS function again.
++    std::atomic<int> park{ 0 };
++    void* game_data = nullptr;       // the game's per-thread data
++    const void* resume = nullptr;    // a thread restored from a save state: what to resume it from
+ };
+ 
+ namespace ultramodern {
+diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index 56c4f4a..05e1f4a 100644
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
++#include "ultramodern/savestate.hpp"
+ #include "ultramodern/extensions.h"
+ 
+ #include "ultramodern/rsp.hpp"
+@@ -198,6 +199,63 @@ static struct {
+     moodycamel::ConcurrentQueue<OSThread*> deleted_threads{};
+ } events_context{};
+ 
++// kig (patch 0012): save states (ultramodern/savestate.hpp).
++extern const OSViMode dummy_mode;
++
++bool ultramodern::savestate::rsp_idle() {
++    return gfx_tasks_pending.load() == 0 && sp_tasks_pending.load() == 0;
++}
++
++ultramodern::savestate::EventSave ultramodern::savestate::get_events(RDRAM_ARG1) {
++    std::lock_guard lock{ events_context.message_mutex };
++    EventSave save{};
++    save.sp_mq = events_context.sp.mq; save.sp_msg = events_context.sp.msg;
++    save.dp_mq = events_context.dp.mq; save.dp_msg = events_context.dp.msg;
++    save.ai_mq = events_context.ai.mq; save.ai_msg = events_context.ai.msg;
++    save.si_mq = events_context.si.mq; save.si_msg = events_context.si.msg;
++    save.vi_cur_state = events_context.vi.cur_state;
++    save.vi_field = events_context.vi.field;
++    for (int i = 0; i < 2; i++) {
++        const ViState& v = events_context.vi.states[i];
++        ViSave& o = save.vi[i];
++        if (v.mode == nullptr) {
++            o.mode = 0;
++        } else if (v.mode == &dummy_mode) {
++            o.mode = 1;
++        } else {
++            o.mode = (uint32_t)((const uint8_t*)v.mode - rdram) + 0x80000000u;
++        }
++        o.framebuffer = v.framebuffer;
++        o.mq = v.mq;
++        o.msg = v.msg;
++        o.state = v.state;
++        o.control = v.control;
++        o.retrace_count = v.retrace_count;
++    }
++    return save;
++}
++
++void ultramodern::savestate::set_events(RDRAM_ARG const EventSave& save) {
++    std::lock_guard lock{ events_context.message_mutex };
++    events_context.sp.mq = save.sp_mq; events_context.sp.msg = save.sp_msg;
++    events_context.dp.mq = save.dp_mq; events_context.dp.msg = save.dp_msg;
++    events_context.ai.mq = save.ai_mq; events_context.ai.msg = save.ai_msg;
++    events_context.si.mq = save.si_mq; events_context.si.msg = save.si_msg;
++    events_context.vi.cur_state = save.vi_cur_state & 1;
++    events_context.vi.field = save.vi_field;
++    for (int i = 0; i < 2; i++) {
++        const ViSave& o = save.vi[i];
++        ViState& v = events_context.vi.states[i];
++        v.mode = o.mode == 0 ? nullptr : o.mode == 1 ? &dummy_mode : TO_PTR(const OSViMode, (int32_t)o.mode);
++        v.framebuffer = o.framebuffer;
++        v.mq = o.mq;
++        v.msg = o.msg;
++        v.state = o.state;
++        v.control = o.control;
++        v.retrace_count = o.retrace_count;
++    }
++}
++
+ ultramodern::renderer::ViRegs* ultramodern::renderer::get_vi_regs() {
+     return &events_context.vi.update_screen_regs;
+ }
+diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
+index bd2fcb5..b4ac50e 100644
+--- a/ultramodern/src/mesgqueue.cpp
++++ b/ultramodern/src/mesgqueue.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
++#include "ultramodern/savestate.hpp"
+ 
+ struct QueuedMessage {
+     PTR(OSMesgQueue) mq;
+@@ -113,6 +114,25 @@ s32 MQ_IS_FULL(OSMesgQueue* mq) {
+     return MQ_GET_COUNT(mq) >= mq->msgCount;
+ }
+ 
++// kig (patch 0012): a thread blocked here is resumed from a save state by calling the OS function again
++// (it rechecks the queue, as this loop does), which UltraThreadContext::park marks.
++static void park_and_run_next(RDRAM_ARG1) {
++    UltraThreadContext* context = TO_PTR(OSThread, ultramodern::this_thread())->context;
++    context->park = 1;
++    ultramodern::run_next_thread_and_wait(PASS_RDRAM1);
++    context->park = 0;
++}
++
++bool ultramodern::savestate::external_queue_empty() {
++    return external_messages.size_approx() == 0;
++}
++
++void ultramodern::savestate::discard_external_messages() {
++    QueuedMessage m;
++    while (external_messages.try_dequeue(m)) {
++    }
++}
++
+ bool do_send(RDRAM_ARG PTR(OSMesgQueue) mq_, OSMesg msg, bool jam, bool block) {
+     OSMesgQueue* mq = TO_PTR(OSMesgQueue, mq_);
+     if (!block) {
+@@ -126,7 +146,7 @@ bool do_send(RDRAM_ARG PTR(OSMesgQueue) mq_, OSMesg msg, bool jam, bool block) {
+         while (MQ_IS_FULL(mq)) {
+             debug_printf("[Message Queue] Thread %d is blocked on send\n", TO_PTR(OSThread, ultramodern::this_thread())->id);
+             ultramodern::thread_queue_insert(PASS_RDRAM GET_MEMBER(OSMesgQueue, mq_, blocked_on_send), ultramodern::this_thread());
+-            ultramodern::run_next_thread_and_wait(PASS_RDRAM1);
++            park_and_run_next(PASS_RDRAM1);
+         }
+     }
+     
+@@ -164,7 +184,7 @@ bool do_recv(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSMesg) msg_, bool block) {
+         while (MQ_IS_EMPTY(mq)) {
+             debug_printf("[Message Queue] Thread %d is blocked on receive\n", TO_PTR(OSThread, ultramodern::this_thread())->id);
+             ultramodern::thread_queue_insert(PASS_RDRAM GET_MEMBER(OSMesgQueue, mq_, blocked_on_recv), ultramodern::this_thread());
+-            ultramodern::run_next_thread_and_wait(PASS_RDRAM1);
++            park_and_run_next(PASS_RDRAM1);
+         }
+     }
+ 
+diff --git a/ultramodern/src/scheduling.cpp b/ultramodern/src/scheduling.cpp
+index b1a71cc..1110ca9 100644
+--- a/ultramodern/src/scheduling.cpp
++++ b/ultramodern/src/scheduling.cpp
+@@ -1,4 +1,5 @@
+ #include "ultramodern/ultramodern.hpp"
++#include "ultramodern/savestate.hpp"
+ 
+ void ultramodern::schedule_running_thread(RDRAM_ARG PTR(OSThread) t_) {
+     debug_printf("[Scheduling] Adding thread %d to the running queue\n", TO_PTR(OSThread, t_)->id);
+@@ -31,6 +32,8 @@ void ultramodern::check_running_queue(RDRAM_ARG1) {
+ 
+ extern "C" void pause_self(RDRAM_ARG1) {
+     while (true) {
++        // kig (patch 0012): save states are taken and loaded here, with every other game thread blocked.
++        ultramodern::savestate::run_idle_hook(PASS_RDRAM1);
+         // Wait until an external message arrives, then allow the next thread to run.
+         ultramodern::wait_for_external_message_idle(PASS_RDRAM1);
+         ultramodern::check_running_queue(PASS_RDRAM1);
+diff --git a/ultramodern/src/threadqueue.cpp b/ultramodern/src/threadqueue.cpp
+index f9c0fa1..2ad1454 100644
+--- a/ultramodern/src/threadqueue.cpp
++++ b/ultramodern/src/threadqueue.cpp
+@@ -1,9 +1,19 @@
+ #include <cassert>
+ 
+ #include "ultramodern/ultramodern.hpp"
++#include "ultramodern/savestate.hpp"
+ 
+ static PTR(OSThread) running_queue_impl = NULLPTR;
+ 
++// kig (patch 0012): save states.
++PTR(OSThread) ultramodern::savestate::get_running_queue() {
++    return running_queue_impl;
++}
++
++void ultramodern::savestate::set_running_queue(PTR(OSThread) head) {
++    running_queue_impl = head;
++}
++
+ static PTR(OSThread)* queue_to_ptr(RDRAM_ARG PTR(PTR(OSThread)) queue) {
+     if (queue == ultramodern::running_queue) {
+         return &running_queue_impl;
+diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
+index 6e3ed18..c82de4b 100644
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -8,6 +8,11 @@
+ #include "blockingconcurrentqueue.h"
+ 
+ #include "ultramodern/threads.hpp"
++#include "ultramodern/savestate.hpp"
++
++#include <algorithm>
++#include <condition_variable>
++#include <mutex>
+ 
+ // Native APIs only used to set thread names for easier debugging
+ #ifdef _WIN32
+@@ -186,6 +191,26 @@ void ultramodern::resume_thread_and_wait(RDRAM_ARG OSThread *t) {
+     wait_for_resumed(PASS_RDRAM cur_context);
+ }
+ 
++// kig (patch 0012): save states. Every live game thread's context, and the hooks the game sets.
++static std::mutex live_mutex;
++static std::condition_variable live_cv;
++static std::vector<UltraThreadContext*> live_contexts;
++static ultramodern::savestate::idle_hook_t* idle_hook = nullptr;
++static ultramodern::savestate::resume_thread_t* resume_thread_func = nullptr;
++
++static void add_live(UltraThreadContext* context) {
++    std::lock_guard lock{ live_mutex };
++    live_contexts.push_back(context);
++}
++
++static void remove_live(UltraThreadContext* context) {
++    {
++        std::lock_guard lock{ live_mutex };
++        live_contexts.erase(std::remove(live_contexts.begin(), live_contexts.end(), context), live_contexts.end());
++    }
++    live_cv.notify_all();
++}
++
+ static void _thread_func(RDRAM_ARG PTR(OSThread) self_, PTR(thread_func_t) entrypoint, PTR(void) arg, UltraThreadContext* thread_context) {
+     OSThread *self = TO_PTR(OSThread, self_);
+     debug_printf("[Thread] Thread created: %d\n", self->id);
+@@ -199,20 +224,28 @@ static void _thread_func(RDRAM_ARG PTR(OSThread) self_, PTR(thread_func_t) entry
+     // Signal the initialized semaphore to indicate that this thread can be started.
+     thread_context->initialized.signal();
+ 
+-    debug_printf("[Thread] Thread waiting to be started: %d\n", self->id);
++    // A thread restored from a save state was already running: it resumes where it was (and blocks).
++    if (thread_context->resume == nullptr) {
++        debug_printf("[Thread] Thread waiting to be started: %d\n", self->id);
+ 
+-    // Wait until the thread is marked as running.
+-    try {
+-        wait_for_resumed(PASS_RDRAM thread_context);
+-    } catch (ultramodern::thread_terminated& terminated) {
++        // Wait until the thread is marked as running.
++        try {
++            wait_for_resumed(PASS_RDRAM thread_context);
++        } catch (ultramodern::thread_terminated& terminated) {
++        }
+     }
+ 
+     // Make sure the thread wasn't replaced or destroyed before it was started.
+     if (self->context == thread_context) {
+         debug_printf("[Thread] Thread started: %d\n", self->id);
+         try {
+-            // Run the thread's function with the provided argument.
+-            run_thread_function(PASS_RDRAM entrypoint, self->sp, arg);
++            thread_context->started = true;
++            if (thread_context->resume != nullptr) {
++                resume_thread_func(PASS_RDRAM thread_context);
++            } else {
++                // Run the thread's function with the provided argument.
++                run_thread_function(PASS_RDRAM entrypoint, self->sp, arg);
++            }
+         } catch (ultramodern::thread_terminated& terminated) {
+         }
+     }
+@@ -262,7 +295,11 @@ extern "C" void osCreateThread(RDRAM_ARG PTR(OSThread) t_, OSId id, PTR(thread_f
+     // Spawn a new thread, which will immediately pause itself and wait until it's been started.
+     // Pass the context as an argument to the thread function to ensure that it can't get cleared before the thread captures its value.
+     UltraThreadContext* context = new UltraThreadContext{};
++    context->thread = t_;
++    context->entrypoint = entrypoint;
++    context->arg = arg;
+     t->context = context;
++    add_live(context);
+     context->host_thread = std::thread{_thread_func, PASS_RDRAM t_, entrypoint, arg, t->context};
+ 
+     // Wait until the thread is initialized to indicate that it's ready to be started.
+@@ -363,9 +400,85 @@ void ultramodern::init_thread_cleanup() {
+ }
+ 
+ void ultramodern::cleanup_thread(UltraThreadContext *cur_context) {
++    remove_live(cur_context);
+     deleted_threads.enqueue(cur_context);
+ }
+ 
++// kig (patch 0012): save states (ultramodern/savestate.hpp).
++void ultramodern::savestate::set_idle_hook(idle_hook_t* hook) {
++    idle_hook = hook;
++}
++
++void ultramodern::savestate::set_resume_thread(resume_thread_t* func) {
++    resume_thread_func = func;
++}
++
++void ultramodern::savestate::run_idle_hook(RDRAM_ARG1) {
++    if (idle_hook != nullptr) {
++        idle_hook(PASS_RDRAM1);
++    }
++}
++
++UltraThreadContext* ultramodern::savestate::this_thread_context(RDRAM_ARG1) {
++    if (thread_self == NULLPTR) {
++        return nullptr;
++    }
++    return TO_PTR(OSThread, thread_self)->context;
++}
++
++std::vector<UltraThreadContext*> ultramodern::savestate::live_threads() {
++    std::lock_guard lock{ live_mutex };
++    return live_contexts;
++}
++
++bool ultramodern::savestate::terminate_other_threads(RDRAM_ARG1) {
++    UltraThreadContext* self = this_thread_context(PASS_RDRAM1);
++    std::vector<UltraThreadContext*> others;
++    for (UltraThreadContext* c : live_threads()) {
++        if (c != self) {
++            others.push_back(c);
++        }
++    }
++    // Each wakes in wait_for_resumed, sees its OSThread no longer points at it and terminates itself.
++    for (UltraThreadContext* c : others) {
++        OSThread* t = TO_PTR(OSThread, c->thread);
++        if (t->context == c) {
++            t->context = nullptr;
++        }
++        c->running.signal();
++    }
++    std::unique_lock lock{ live_mutex };
++    return live_cv.wait_for(lock, std::chrono::seconds(5), [&] {
++        for (UltraThreadContext* c : others) {
++            if (std::find(live_contexts.begin(), live_contexts.end(), c) != live_contexts.end()) {
++                return false;
++            }
++        }
++        return true;
++    });
++}
++
++UltraThreadContext* ultramodern::savestate::create_restored_thread(RDRAM_ARG PTR(OSThread) t_, PTR(void) entrypoint, PTR(void) arg, const void* resume) {
++    OSThread* t = TO_PTR(OSThread, t_);
++    UltraThreadContext* context = new UltraThreadContext{};
++    context->thread = t_;
++    context->entrypoint = entrypoint;
++    context->arg = arg;
++    context->resume = resume;
++    t->context = context;
++    add_live(context);
++    context->host_thread = std::thread{_thread_func, PASS_RDRAM t_, entrypoint, arg, context};
++    context->initialized.wait();
++    return context;
++}
++
++void ultramodern::savestate::park_self(RDRAM_ARG1) {
++    UltraThreadContext* context = this_thread_context(PASS_RDRAM1);
++    context->park = 1;
++    wait_for_resumed(PASS_RDRAM context);
++    context->park = 0;
++}
++
+ void ultramodern::join_thread_cleaner_thread() {
+     thread_cleaner_thread.join();
+ }

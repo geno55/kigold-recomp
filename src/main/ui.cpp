@@ -55,6 +55,9 @@ namespace {
 
     std::mutex frame_mtx;
     std::atomic<bool> shown{ false };
+    std::string toast_text;  // kig::ui::toast (main thread)
+    bool toast_error = false;
+    Clock::time_point toast_until{};
     SDL_Window* window = nullptr;
     kig::ui::LauncherCallbacks launcher;
     bool initialized = false;
@@ -609,6 +612,22 @@ namespace {
         return font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str());
     }
 
+    // kig::ui::toast: a panel in the top-left corner, over the game.
+    void build_toast() {
+        const float body = 30.0f * scale;
+        const float pad = 14.0f * scale;
+        const ImVec2 ts = text_size(font_body, body, toast_text);
+        ImGui::SetNextWindowPos(ImVec2(pad, pad));
+        ImGui::SetNextWindowSize(ImVec2(ts.x + 2 * pad, ts.y + 2 * pad));
+        ImGui::Begin("##toast", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs |
+                     ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoFocusOnAppearing);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(ImVec2(pad, pad), ImVec2(pad + ts.x + 2 * pad, pad + ts.y + 2 * pad), ColPanel, 8.0f * scale);
+        text_at(font_body, body, ImVec2(2 * pad, 2 * pad), toast_error ? ColBad : ColText, toast_text);
+        ImGui::End();
+    }
+
     void build_launcher() {
         const ImVec2 size = ImGui::GetIO().DisplaySize;
         draw_background(true);
@@ -1132,15 +1151,18 @@ void kig::ui::update() {
     }
     if (capture.active && now - capture.start > CaptureTimeout) capture.active = false;
     update_pause();
-    shown = screen != Screen::None;
+    const bool toast_on = !toast_text.empty() && now < toast_until;
+    shown = screen != Screen::None || toast_on;
     if (screen == Screen::None) {
         actions = {};
-        return;
+        if (!toast_on) {
+            return;
+        }
     }
 
     // Held directions: one step on press, then repeats.
     bool any_held = false;
-    for (int d = 0; d < NumDirs; d++) {
+    for (int d = 0; d < NumDirs && screen != Screen::None; d++) {
         const bool held = key_held[d] || dpad_held[d] || stick_held[d];
         any_held |= held;
         if (wait_release) continue;
@@ -1184,11 +1206,20 @@ void kig::ui::update() {
     ImGui::NewFrame();
     if (screen == Screen::Launcher) {
         build_launcher();
-    } else {
+    } else if (screen == Screen::Settings) {
         build_settings();
+    }
+    if (toast_on) {
+        build_toast();
     }
     ImGui::Render();
     actions = {};
     mouse_moved = false;
-    shown = screen != Screen::None;
+    shown = screen != Screen::None || toast_on;
+}
+
+void kig::ui::toast(const std::string& text, bool error) {
+    toast_text = text;
+    toast_error = error;
+    toast_until = Clock::now() + std::chrono::milliseconds(error ? 4000 : 2000);
 }
