@@ -17,6 +17,7 @@
 
 #include "recomp.h"
 #include "ultramodern/ultramodern.hpp"
+#include "ultramodern/config.hpp"
 #include "librecomp/game.hpp"
 #include "librecomp/overlays.hpp"
 #include "kig_crash.h"
@@ -327,6 +328,68 @@ extern "C" void kig_rain_end(uint8_t* rdram, recomp_context* ctx) {
         if (((uint32_t)MEM_W(0, (gpr)(int32_t)at) >> 24) == 0xE4) rects++;  // G_TEXRECT
     }
     MEM_W(0, (gpr)(int32_t)start) = 0x06000000u | 0x8000u | std::min<uint32_t>(rects, 0x7FFF);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Torch flames. func_800288BC draws each flame as particles, one texture rectangle each, from screen
+// positions in 20.12 fixed point (0xDC($sp) = x, 0xD8($sp) = y). It skips a particle unless
+// -width < x < 320 + width (0x80028D20, 0x80028D50) and draws x < 0 at 0 (rectangle coordinates are
+// unsigned), so with the Expand aspect ratio the torches beside the 4:3 area had no flames. With Expand:
+// - the cull bounds widen by a screen width on each side;
+// - a particle left of the screen is moved a screen width right, where it can be encoded;
+// - each flame rectangle is tagged in the reserved top bits of its second word (bit 31: clip it to the
+//   whole wide screen, bit 30: it was moved, draw it a screen width left). RT64 patch 0005 reads them; the
+//   RDP ignores those bits.
+// The drawn coordinates are x >> ($s4 - *$s5) (10.2), so a screen width in x units is 1280 << that.
+// ---------------------------------------------------------------------------------------------
+namespace {
+    bool flame_moved = false;  // the current particle was moved right (game thread only)
+
+    bool expand_on() {
+        return ultramodern::renderer::get_graphics_config().ar_option == ultramodern::renderer::AspectRatio::Expand;
+    }
+
+    int32_t flame_screen_width(uint8_t* rdram, recomp_context* ctx) {
+        const int32_t shift = (int32_t)ctx->r20 - (int32_t)MEM_BU(0, ctx->r21);
+        return (shift >= 0 && shift <= 16) ? (1280 << shift) : (320 << 12);
+    }
+}
+
+// Before 0x80028D20 (slt $at, $s3, $v1): $s3 is the left bound.
+extern "C" void kig_flame_cull_left(uint8_t* rdram, recomp_context* ctx) {
+    if (expand_on()) {
+        ctx->r19 = (gpr)(int32_t)-flame_screen_width(rdram, ctx);
+    }
+}
+
+// Before 0x80028D50 (slt $at, $v1, $t5): $t5 is the right bound.
+extern "C" void kig_flame_cull_right(uint8_t* rdram, recomp_context* ctx) {
+    if (expand_on()) {
+        ctx->r13 = (gpr)(int32_t)((int32_t)ctx->r13 + flame_screen_width(rdram, ctx));
+    }
+}
+
+// Before 0x8002936C, where the particle's G_TEXRECT is built.
+extern "C" void kig_flame_rect_begin(uint8_t* rdram, recomp_context* ctx) {
+    flame_moved = false;
+    if (!expand_on()) {
+        return;
+    }
+    const int32_t x = (int32_t)MEM_W(0xDC, ctx->r29);
+    if (x < 0) {
+        MEM_W(0xDC, ctx->r29) = x + flame_screen_width(rdram, ctx);
+        flame_moved = true;
+    }
+}
+
+// Before 0x80029448: the G_TEXRECT at $t1 is written.
+extern "C" void kig_flame_rect_end(uint8_t* rdram, recomp_context* ctx) {
+    if (!expand_on()) {
+        return;
+    }
+    const uint32_t w1 = (uint32_t)MEM_W(4, ctx->r9);
+    MEM_W(4, ctx->r9) = (int32_t)(w1 | 0x80000000u | (flame_moved ? 0x40000000u : 0u));
+    flame_moved = false;
 }
 
 // The game's handwritten code reads COP0 Count directly (seg2); same clock as osGetCount. Its fight

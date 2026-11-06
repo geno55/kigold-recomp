@@ -92,6 +92,26 @@ before_vram = 0x800284C4
 text = "kig_rain_end(rdram, ctx); /* kig: Expand rain */"
 
 [[patches.hook]]
+func = "func_800288BC"
+before_vram = 0x80028D20
+text = "kig_flame_cull_left(rdram, ctx); /* kig: Expand flames */"
+
+[[patches.hook]]
+func = "func_800288BC"
+before_vram = 0x80028D50
+text = "kig_flame_cull_right(rdram, ctx); /* kig: Expand flames */"
+
+[[patches.hook]]
+func = "func_800288BC"
+before_vram = 0x8002936C
+text = "kig_flame_rect_begin(rdram, ctx); /* kig: Expand flames */"
+
+[[patches.hook]]
+func = "func_800288BC"
+before_vram = 0x80029448
+text = "kig_flame_rect_end(rdram, ctx); /* kig: Expand flames */"
+
+[[patches.hook]]
 func = "func_8000FAA0"
 before_vram = 0x80010048
 text = "kig_gfx_track(rdram, ctx, 0x80010048u, ctx->r25); /* kig: #7 check */"

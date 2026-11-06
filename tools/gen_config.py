@@ -69,7 +69,14 @@ HOOKS = [
     # Rain (func_80028140(gfx), Maya's stage): its drops are tagged for RT64's Expand aspect ratio after
     # they are written, before the jr $ra at 0x800284C4 (src/game/kig_hooks.cpp).
     ("func_80028140", 0x80028140, "kig_rain_begin(rdram, ctx); /* kig: Expand rain */"),
-    ("func_80028140", 0x800284C4, "kig_rain_end(rdram, ctx); /* kig: Expand rain */"),]
+    ("func_80028140", 0x800284C4, "kig_rain_end(rdram, ctx); /* kig: Expand rain */"),
+    # Torch flames (func_800288BC): with Expand, the particle cull bounds widen (0x80028D20, 0x80028D50),
+    # and each particle's G_TEXRECT is moved or tagged for RT64 (built from 0x8002936C, written by
+    # 0x80029448; src/game/kig_hooks.cpp).
+    ("func_800288BC", 0x80028D20, "kig_flame_cull_left(rdram, ctx); /* kig: Expand flames */"),
+    ("func_800288BC", 0x80028D50, "kig_flame_cull_right(rdram, ctx); /* kig: Expand flames */"),
+    ("func_800288BC", 0x8002936C, "kig_flame_rect_begin(rdram, ctx); /* kig: Expand flames */"),
+    ("func_800288BC", 0x80029448, "kig_flame_rect_end(rdram, ctx); /* kig: Expand flames */"),]
 
 # Display list pointer check (#7, src/game/kig_hooks.cpp; does nothing unless KIG_PTR_CHECK is set). The
 # fight loop func_8000FAA0 keeps the display list head at 0x8004A318 ($s6 from 0x8001001C) and stores it

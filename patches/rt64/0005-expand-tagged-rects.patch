@@ -1,0 +1,52 @@
+diff --git a/src/gbi/rt64_gbi_rdp.cpp b/src/gbi/rt64_gbi_rdp.cpp
+index 4c67530..136c120 100644
+--- a/src/gbi/rt64_gbi_rdp.cpp
++++ b/src/gbi/rt64_gbi_rdp.cpp
+@@ -174,6 +174,7 @@ namespace RT64 {
+             const int32_t lrx = (*dl)->p0(12, 12);
+             const int32_t lry = (*dl)->p0(0, 12);
+             const uint8_t tile = (*dl)->p1(24, 3);
++            state->rdp->expandRectTag = uint8_t((*dl)->p1(30, 2));  // kig patch: see RDP::drawTexRect
+             *dl = *dl + 1;
+ 
+             const int16_t uls = (*dl)->p1(16, 16);
+diff --git a/src/hle/rt64_rdp.cpp b/src/hle/rt64_rdp.cpp
+index 266d014..7b9c578 100644
+--- a/src/hle/rt64_rdp.cpp
++++ b/src/hle/rt64_rdp.cpp
+@@ -1379,6 +1379,23 @@ namespace RT64 {
+             }
+         }
+ 
++        // kig patch: KI Gold tags a rectangle in the reserved top bits of its second word (src/game/kig_hooks.cpp,
++        // the torch flames): bit 31 clips it to the whole wide screen, bit 30 draws it a screen width further left
++        // (it was moved right, since rectangle coordinates can't be negative). Only with the Expand aspect ratio.
++        const uint8_t rectTag = expandRectTag;
++        expandRectTag = 0;
++        if ((rectTag & 0x2) && !extended && (state->ext.userConfig->aspectRatio == UserConfiguration::AspectRatio::Expand) &&
++            (extAlignment.leftOrigin == G_EX_ORIGIN_NONE) && (extAlignment.rightOrigin == G_EX_ORIGIN_NONE))
++        {
++            if (rectTag & 0x1) {
++                const int32_t screenWidth = int32_t(colorImage.width) << 2;
++                ulx -= screenWidth;
++                lrx -= screenWidth;
++            }
++
++            extended = true;
++        }
++
+         // kig patch: a rectangle tagged to repeat (KI Gold's raindrops, see GBI_F3D::runDl) is drawn again a screen
+         // width to the left and to the right with the Expand aspect ratio. Each copy is clipped to its side strip,
+         // so a drop that crosses an edge of the 4:3 area isn't doubled inside it.
+diff --git a/src/hle/rt64_rdp.h b/src/hle/rt64_rdp.h
+index 3a9bc44..8df33d4 100644
+--- a/src/hle/rt64_rdp.h
++++ b/src/hle/rt64_rdp.h
+@@ -75,6 +75,7 @@ namespace RT64 {
+         uint64_t tileReplacementHashes[RDP_TILES] = {};
+         bool inRawRdpList = false;  // kig patch: commands come from a raw RDP list, not a gfx task
+         uint32_t expandRepeatRects = 0;  // kig patch: texture rectangles still to repeat in the side strips (GBI_F3D::runDl)
++        uint8_t expandRectTag = 0;  // kig patch: the reserved top bits of the current G_TEXRECT's second word (RDP::drawTexRect)
+ 
+         struct {
+             uint32_t address = 0;

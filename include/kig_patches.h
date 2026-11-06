@@ -39,6 +39,13 @@ void kig_gfx_check(uint8_t* rdram, uint32_t site);
 void kig_rain_begin(uint8_t* rdram, recomp_context* ctx);
 void kig_rain_end(uint8_t* rdram, recomp_context* ctx);
 
+// src/game/kig_hooks.cpp: the torch flames (func_800288BC). With the Expand aspect ratio the cull bounds
+// widen, particles left of the screen move right, and each flame rectangle is tagged for RT64.
+void kig_flame_cull_left(uint8_t* rdram, recomp_context* ctx);
+void kig_flame_cull_right(uint8_t* rdram, recomp_context* ctx);
+void kig_flame_rect_begin(uint8_t* rdram, recomp_context* ctx);
+void kig_flame_rect_end(uint8_t* rdram, recomp_context* ctx);
+
 // src/game/kig_hooks.cpp: `mfc0 rt, Count` in game code (N64Recomp patch in patches/n64recomp/).
 uint32_t recomp_cop0_count(void);
 
