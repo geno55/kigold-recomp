@@ -54,9 +54,9 @@ SETTINGS AND SAVES  (%APPDATA%\KIGRecomp)
 KNOWN LIMITATIONS
   - This is an early release. Not every character and stage has been checked; report problems on
     GitHub (attach the log or crash report).
-  - Widescreen is not supported yet: the experimental Expand aspect ratio shows broken scenery at the
-    sides of the screen, because the game was made for 4:3. The Stretch aspect ratio fills the window
-    with the 4:3 picture instead (everything looks wider). High frame rate is not supported yet.
+  - The Expand aspect ratio fills wider screens, but the game was made for 4:3, so some stages show
+    gaps in the scenery at the sides. The Stretch aspect ratio fills the window with the 4:3 picture
+    instead (everything looks wider). High frame rate is not supported yet.
 
 LICENSE
   GPL-3.0 (LICENSE.txt). kig.exe contains this project's code (GPL-3.0), N64ModernRuntime (GPL-3.0) and

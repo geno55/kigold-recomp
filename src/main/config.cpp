@@ -98,9 +98,9 @@ namespace {
             WindowMode::Windowed);
         graphics.add_enum_option("aspect_ratio", "Aspect ratio",
             "Original: 4:3, as on the N64. Stretch: the 4:3 picture stretched to fill the window, so everything looks wider. "
-            "Expand: fills wider screens, but the game was made for 4:3, so the sides show broken scenery.",
+            "Expand: fills wider screens with more of the scene. The game was made for 4:3, so some stages show gaps at the sides.",
             { { AspectRatio::Original, "Original" }, { AspectRatio::Stretch, "Stretch", "Stretch to fill" },
-              { AspectRatio::Expand, "Expand", "Expand (experimental)" } },
+              { AspectRatio::Expand, "Expand" } },
             AspectRatio::Original);
         graphics.add_enum_option("antialiasing", "Antialiasing", "",
             { { Antialiasing::None, "None" }, { Antialiasing::MSAA2X, "MSAA2X", "MSAA 2x" }, { Antialiasing::MSAA4X, "MSAA4X", "MSAA 4x" },
