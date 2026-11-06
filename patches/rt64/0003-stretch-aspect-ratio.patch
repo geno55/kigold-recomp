@@ -1,0 +1,154 @@
+diff --git a/src/common/rt64_user_configuration.h b/src/common/rt64_user_configuration.h
+index 4857f22..a7153c4 100644
+--- a/src/common/rt64_user_configuration.h
++++ b/src/common/rt64_user_configuration.h
+@@ -52,6 +52,8 @@ namespace RT64 {
+             Original,
+             Expand,
+             Manual,
++            // Renders like Original; the VI renderer scales the picture to fill the window, unevenly.
++            Stretch,
+             OptionCount
+         };
+ 
+@@ -130,7 +132,8 @@ namespace RT64 {
+     NLOHMANN_JSON_SERIALIZE_ENUM(UserConfiguration::AspectRatio, {
+         { UserConfiguration::AspectRatio::Original, "Original" },
+         { UserConfiguration::AspectRatio::Expand, "Expand" },
+-        { UserConfiguration::AspectRatio::Manual, "Manual" }
++        { UserConfiguration::AspectRatio::Manual, "Manual" },
++        { UserConfiguration::AspectRatio::Stretch, "Stretch" }
+     });
+ 
+     NLOHMANN_JSON_SERIALIZE_ENUM(UserConfiguration::Antialiasing, {
+diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
+index 7de5b69..b0a18b5 100644
+--- a/src/hle/rt64_present_queue.cpp
++++ b/src/hle/rt64_present_queue.cpp
+@@ -99,6 +99,7 @@ namespace RT64 {
+         hlslpp::float2 resolutionScale;
+         EnhancementConfiguration::Presentation::Mode presentationMode;
+         bool removeBlackBorders;
++        bool stretch;
+         UserConfiguration::RefreshRate refreshRate;
+         UserConfiguration::Filtering filtering;
+         uint32_t viOriginalRate;
+@@ -108,6 +109,7 @@ namespace RT64 {
+             resolutionScale = ext.sharedResources->resolutionScale;
+             presentationMode = ext.sharedResources->enhancementConfig.presentation.mode;
+             removeBlackBorders = ext.sharedResources->enhancementConfig.presentation.removeBlackBorders;
++            stretch = (ext.sharedResources->userConfig.aspectRatio == UserConfiguration::AspectRatio::Stretch);
+             refreshRate = ext.sharedResources->userConfig.refreshRate;
+             filtering = ext.sharedResources->userConfig.filtering;
+             viOriginalRate = ext.sharedResources->viOriginalRate;
+@@ -324,6 +326,7 @@ namespace RT64 {
+                     renderParams.filtering = filtering;
+                     renderParams.vi = &present.screenVI;
+                     renderParams.removeBlackBorders = removeBlackBorders;
++                    renderParams.stretch = stretch;
+ 
+                     const bool useDownsampling = (colorTarget->downsampleMultiplier > 1);
+                     if (useDownsampling) {
+diff --git a/src/hle/rt64_state.cpp b/src/hle/rt64_state.cpp
+index 56afafd..9778faa 100644
+--- a/src/hle/rt64_state.cpp
++++ b/src/hle/rt64_state.cpp
+@@ -2068,10 +2068,11 @@ namespace RT64 {
+             const hlslpp::float2 resolutionScale = ext.sharedQueueResources->resolutionScale;
+             bool removeBlackBorders = ext.sharedQueueResources->enhancementConfig.presentation.removeBlackBorders;
+             const uint32_t downsampleMultiplier = ext.userConfig->downsampleMultiplier;
++            const bool stretch = (ext.userConfig->aspectRatio == UserConfiguration::AspectRatio::Stretch);
+             ext.sharedQueueResources->configurationMutex.unlock();
+             RenderViewport viewport;
+             RenderRect scissor;
+-            VIRenderer::getViewportAndScissor(ext.swapChain, lastScreenVI, resolutionScale, downsampleMultiplier, removeBlackBorders, viewport, scissor);
++            VIRenderer::getViewportAndScissor(ext.swapChain, lastScreenVI, resolutionScale, downsampleMultiplier, removeBlackBorders, stretch, viewport, scissor);
+ 
+             // Convert the mouse coordinates to native coordinates.
+             hlslpp::float2 screenCursorPos;
+@@ -2142,7 +2143,7 @@ namespace RT64 {
+ 
+                     genConfigChanged = ImGui::Combo("Filtering", reinterpret_cast<int *>(&userConfig.filtering), "Nearest\0Linear\0Pixel Scaling\0") || genConfigChanged;
+ 
+-                    resConfigChanged = ImGui::Combo("Aspect Ratio Mode", reinterpret_cast<int *>(&userConfig.aspectRatio), "Original\0Expand\0Manual\0") || resConfigChanged;
++                    resConfigChanged = ImGui::Combo("Aspect Ratio Mode", reinterpret_cast<int *>(&userConfig.aspectRatio), "Original\0Expand\0Manual\0Stretch\0") || resConfigChanged;
+                     const bool manualAspectRatio = (userConfig.aspectRatio == UserConfiguration::AspectRatio::Manual);
+                     if (manualAspectRatio) {
+                         resConfigChanged = ImGui::InputDouble("Aspect Ratio", &userConfig.aspectTarget) || resConfigChanged;
+diff --git a/src/render/rt64_vi_renderer.cpp b/src/render/rt64_vi_renderer.cpp
+index b4ff4e9..5bf7af1 100644
+--- a/src/render/rt64_vi_renderer.cpp
++++ b/src/render/rt64_vi_renderer.cpp
+@@ -23,11 +23,16 @@ namespace RT64 {
+         return coordinate * relativeScale;
+     }
+ 
+-    inline hlslpp::float2 fromHDtoWindow(hlslpp::float2 coordinate, hlslpp::float2 hdSize, hlslpp::float2 windowSize) {
++    inline hlslpp::float2 fromHDtoWindow(hlslpp::float2 coordinate, hlslpp::float2 hdSize, hlslpp::float2 windowSize, bool stretch) {
+         const hlslpp::float2 hdCenter = hdSize / 2;
+         const hlslpp::float2 windowCenter = windowSize / 2;
+         const hlslpp::float2 relativeCoordinate = { coordinate.x - hdCenter.x, coordinate.y - hdCenter.y };
+ 
++        // Stretch: fill the window, scaling each axis on its own.
++        if (stretch) {
++            return windowCenter + relativeCoordinate * (windowSize / hdSize);
++        }
++
+         // Window is wider than virtual HD TV, we do pillarboxing.
+         float relativeScale;
+         if ((windowSize.x / windowSize.y) > (hdSize.x / hdSize.y)) {
+@@ -69,7 +74,7 @@ namespace RT64 {
+ 
+         RenderViewport viewport;
+         RenderRect scissor;
+-        getViewportAndScissor(p.swapChain, *p.vi, p.resolutionScale, p.downsamplingScale, p.removeBlackBorders, viewport, scissor);
++        getViewportAndScissor(p.swapChain, *p.vi, p.resolutionScale, p.downsamplingScale, p.removeBlackBorders, p.stretch, viewport, scissor);
+         p.commandList->setViewports(viewport);
+         p.commandList->setScissors(scissor);
+ 
+@@ -86,7 +91,7 @@ namespace RT64 {
+         p.commandList->drawInstanced(3, 1, 0, 0);
+     }
+ 
+-    void VIRenderer::getViewportAndScissor(const RenderSwapChain *swapChain, const VI &vi, hlslpp::float2 resolutionScale, uint32_t downsamplingScale, bool removeBlackBorders, RenderViewport &viewport, RenderRect &scissor) {
++    void VIRenderer::getViewportAndScissor(const RenderSwapChain *swapChain, const VI &vi, hlslpp::float2 resolutionScale, uint32_t downsamplingScale, bool removeBlackBorders, bool stretch, RenderViewport &viewport, RenderRect &scissor) {
+         // We define three different coordinate spaces to work with to translate the VI parameters into the Window.
+         //
+         // VideoSD: This corresponds to the SD TV Scanline space, which is what the VI natively works on.
+@@ -111,13 +116,13 @@ namespace RT64 {
+         // Scale all the rectangles to the space of the Window.
+         hlslpp::float2 topLeftViewport = fromSDtoHD({ float(viViewRect.x), float(viViewRect.y) }, sdSize, hdSize);
+         hlslpp::float2 bottomRightViewport = fromSDtoHD({ float(viViewRect.x + viViewRect.z), float(viViewRect.y + viViewRect.w) }, sdSize, hdSize);
+-        topLeftViewport = fromHDtoWindow(topLeftViewport, hdSize, windowSize);
+-        bottomRightViewport = fromHDtoWindow(bottomRightViewport, hdSize, windowSize);
++        topLeftViewport = fromHDtoWindow(topLeftViewport, hdSize, windowSize, stretch);
++        bottomRightViewport = fromHDtoWindow(bottomRightViewport, hdSize, windowSize, stretch);
+ 
+         hlslpp::float2 topLeftScissor = fromSDtoHD({ float(viCropRect.x), float(viCropRect.y) }, sdSize, hdSize);
+         hlslpp::float2 bottomRightScissor = fromSDtoHD({ float(viCropRect.x + viCropRect.z), float(viCropRect.y + viCropRect.w) }, sdSize, hdSize);
+-        topLeftScissor = fromHDtoWindow(topLeftScissor, hdSize, windowSize);
+-        bottomRightScissor = fromHDtoWindow(bottomRightScissor, hdSize, windowSize);
++        topLeftScissor = fromHDtoWindow(topLeftScissor, hdSize, windowSize, stretch);
++        bottomRightScissor = fromHDtoWindow(bottomRightScissor, hdSize, windowSize, stretch);
+ 
+         viewport = RenderViewport(topLeftViewport.x, topLeftViewport.y, bottomRightViewport.x - topLeftViewport.x, bottomRightViewport.y - topLeftViewport.y);
+         scissor = RenderRect(lround(topLeftScissor.x), lround(topLeftScissor.y), lround(bottomRightScissor.x), lround(bottomRightScissor.y));
+diff --git a/src/render/rt64_vi_renderer.h b/src/render/rt64_vi_renderer.h
+index 8a3782a..1fe004a 100644
+--- a/src/render/rt64_vi_renderer.h
++++ b/src/render/rt64_vi_renderer.h
+@@ -29,11 +29,12 @@ namespace RT64 {
+             UserConfiguration::Filtering filtering = UserConfiguration::Filtering::Linear;
+             const VI *vi = nullptr;
+             bool removeBlackBorders = false;
++            bool stretch = false;
+         };
+ 
+         VIRenderer();
+         ~VIRenderer();
+         void render(const RenderParams &p);
+-        static void getViewportAndScissor(const RenderSwapChain *swapChain, const VI &vi, hlslpp::float2 resolutionScale, uint32_t downsamplingScale, bool removeBlackBorders, RenderViewport &viewport, RenderRect &scissor);
++        static void getViewportAndScissor(const RenderSwapChain *swapChain, const VI &vi, hlslpp::float2 resolutionScale, uint32_t downsamplingScale, bool removeBlackBorders, bool stretch, RenderViewport &viewport, RenderRect &scissor);
+     };
+ };
+\ No newline at end of file

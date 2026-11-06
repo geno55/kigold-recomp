@@ -1,0 +1,20 @@
+diff --git a/ultramodern/include/ultramodern/config.hpp b/ultramodern/include/ultramodern/config.hpp
+index 2f22456..90a58b6 100644
+--- a/ultramodern/include/ultramodern/config.hpp
++++ b/ultramodern/include/ultramodern/config.hpp
+@@ -36,6 +36,7 @@ namespace ultramodern {
+             Original,
+             Expand,
+             Manual,
++            Stretch,
+             OptionCount
+         };
+         enum class Antialiasing {
+@@ -113,6 +114,7 @@ namespace ultramodern {
+             {ultramodern::renderer::AspectRatio::Original, "Original"},
+             {ultramodern::renderer::AspectRatio::Expand, "Expand"},
+             {ultramodern::renderer::AspectRatio::Manual, "Manual"},
++            {ultramodern::renderer::AspectRatio::Stretch, "Stretch"},
+         });
+ 
+         NLOHMANN_JSON_SERIALIZE_ENUM(ultramodern::renderer::Antialiasing, {

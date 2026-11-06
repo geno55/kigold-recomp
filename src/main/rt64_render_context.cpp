@@ -44,6 +44,7 @@ static RT64::UserConfiguration::AspectRatio to_rt64(ultramodern::renderer::Aspec
     switch (option) {
         case ultramodern::renderer::AspectRatio::Expand: return RT64::UserConfiguration::AspectRatio::Expand;
         case ultramodern::renderer::AspectRatio::Manual: return RT64::UserConfiguration::AspectRatio::Manual;
+        case ultramodern::renderer::AspectRatio::Stretch: return RT64::UserConfiguration::AspectRatio::Stretch;
         case ultramodern::renderer::AspectRatio::Original:
         default: return RT64::UserConfiguration::AspectRatio::Original;
     }
