@@ -34,7 +34,7 @@ diff --git a/src/hle/rt64_rdp.cpp b/src/hle/rt64_rdp.cpp
 index a10c11a..b3d5183 100644
 --- a/src/hle/rt64_rdp.cpp
 +++ b/src/hle/rt64_rdp.cpp
-@@ -1339,7 +1339,47 @@ namespace RT64 {
+@@ -1339,7 +1339,50 @@ namespace RT64 {
              lry |= 3;
          }
  
@@ -43,17 +43,20 @@ index a10c11a..b3d5183 100644
 +        // select fire) is extended past that side by a screen width, its texture continuing, so it fills the
 +        // wider screen. Only the strips at the edges reach a side; a rectangle that covers the whole width is
 +        // already stretched when drawn. Gfx task rectangles (sprites that happen to touch an edge) are left alone.
++        // A rectangle whose s doesn't change across it (dsdx 0, like the fight sky's top band, a vertical gradient
++        // drawn in two pieces) is extended too, whatever its wrap mode: every column samples the same texels.
 +        const FixedRect &expandScissor = scissorRectStack[scissorStackSize - 1];
 +        const LoadTile &expandTile = tiles[tile];
++        const bool expandRepeats = ((expandTile.cms & G_TX_CLAMP) == 0) && (expandTile.masks > 0);
 +        const bool expandCandidate = inRawRdpList && (state->ext.userConfig->aspectRatio == UserConfiguration::AspectRatio::Expand) && !flip &&
 +            !expandScissor.isNull() && (expandScissor.ulx <= 0) && (expandScissor.lrx >= int32_t(colorImage.width << 2) - 4) &&
 +            (extAlignment.leftOrigin == G_EX_ORIGIN_NONE) && (extAlignment.rightOrigin == G_EX_ORIGIN_NONE) &&
-+            ((expandTile.cms & G_TX_CLAMP) == 0) && (expandTile.masks > 0);
++            (expandRepeats || (dsdx == 0));
 +        // A sliver at the edge (KI Gold's fire also redraws a 1-pixel column at the right) is skipped: its
 +        // texture doesn't line up with the strip next to it, which is extended over it, and on a wider screen
 +        // that column is no longer at the edge, so it showed as a line.
 +        constexpr int32_t MinExpandWidth = 8 << 2;
-+        if (expandCandidate && ((lrx - ulx) < MinExpandWidth) && ((ulx <= expandScissor.ulx) || (lrx >= expandScissor.lrx - 4))) {
++        if (expandCandidate && expandRepeats && ((lrx - ulx) < MinExpandWidth) && ((ulx <= expandScissor.ulx) || (lrx >= expandScissor.lrx - 4))) {
 +            return;
 +        }
 +        bool extended = false;
