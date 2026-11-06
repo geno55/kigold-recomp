@@ -65,7 +65,11 @@ HOOKS = [
     ("seg2_801AFC94", 0x801AFD64, "kig_dispatch_entity(rdram, ctx); return; /* kig: entity dispatch */"),
     ("seg2_801AFD44", 0x801AFD64, "kig_dispatch_entity(rdram, ctx); return; /* kig: entity dispatch */"),
     ("seg2_801BE720", 0x801BE74C, "ctx->r6 = ADD32(0, 0X22); kig_restart_state(rdram, ctx); return; /* kig: state restart */"),
-    ("seg2_801BE784", 0x801BE790, "MEM_B(0X8C, ctx->r30) = ctx->r7; kig_restart_state(rdram, ctx); return; /* kig: state restart */"),]
+    ("seg2_801BE784", 0x801BE790, "MEM_B(0X8C, ctx->r30) = ctx->r7; kig_restart_state(rdram, ctx); return; /* kig: state restart */"),
+    # Rain (func_80028140(gfx), Maya's stage): its drops are tagged for RT64's Expand aspect ratio after
+    # they are written, before the jr $ra at 0x800284C4 (src/game/kig_hooks.cpp).
+    ("func_80028140", 0x80028140, "kig_rain_begin(rdram, ctx); /* kig: Expand rain */"),
+    ("func_80028140", 0x800284C4, "kig_rain_end(rdram, ctx); /* kig: Expand rain */"),]
 
 # Display list pointer check (#7, src/game/kig_hooks.cpp; does nothing unless KIG_PTR_CHECK is set). The
 # fight loop func_8000FAA0 keeps the display list head at 0x8004A318 ($s6 from 0x8001001C) and stores it

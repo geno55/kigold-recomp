@@ -82,6 +82,16 @@ before_vram = 0x801BE790
 text = "MEM_B(0X8C, ctx->r30) = ctx->r7; kig_restart_state(rdram, ctx); return; /* kig: state restart */"
 
 [[patches.hook]]
+func = "func_80028140"
+before_vram = 0x80028140
+text = "kig_rain_begin(rdram, ctx); /* kig: Expand rain */"
+
+[[patches.hook]]
+func = "func_80028140"
+before_vram = 0x800284C4
+text = "kig_rain_end(rdram, ctx); /* kig: Expand rain */"
+
+[[patches.hook]]
 func = "func_8000FAA0"
 before_vram = 0x80010048
 text = "kig_gfx_track(rdram, ctx, 0x80010048u, ctx->r25); /* kig: #7 check */"

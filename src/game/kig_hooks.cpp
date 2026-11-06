@@ -1,5 +1,6 @@
 // Hooks called from recompiled code ([[patches.hook]] entries in tools/gen_config.py), plus the
 // test-only helpers (each does nothing unless its environment variable is set).
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csetjmp>
@@ -293,6 +294,39 @@ extern "C" void kig_gfx_check(uint8_t* rdram, uint32_t site) {
         return;
     }
     gfx_validate(rdram, site, (uint32_t)MEM_W(0, (gpr)(int32_t)GfxHead), false);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rain (Maya's stage). func_80028140(gfx) appends the raindrops to the frame's display list: a call to
+// the rain render state (06000000 80047F00), then one texture rectangle per drop, at screen positions in
+// 0..320, and returns the new end. With the Expand aspect ratio RT64 keeps gfx task rectangles in the 4:3
+// area, so the sides had no rain. After the function returns, the drop count goes in the unused low bits
+// of that call's first word (0x8000 | count); RT64 patch 0004 reads it there and draws those rectangles
+// again a screen width to the left and right, in the side strips. The RSP ignores those bits, and the
+// display list doesn't grow.
+// ---------------------------------------------------------------------------------------------
+namespace {
+    constexpr uint32_t RainStateDl = 0x80047F00;
+    uint32_t rain_gfx = 0;  // the gfx pointer func_80028140 was given (only the game thread draws)
+}
+
+extern "C" void kig_rain_begin(uint8_t* rdram, recomp_context* ctx) {
+    (void)rdram;
+    rain_gfx = (uint32_t)ctx->r4;
+}
+
+extern "C" void kig_rain_end(uint8_t* rdram, recomp_context* ctx) {
+    const uint32_t start = rain_gfx, end = (uint32_t)ctx->r5;  // $a1: the end, returned in $v0
+    rain_gfx = 0;
+    if (start == 0 || end <= start || end - start > 0x10000 || (uint32_t)MEM_W(0, (gpr)(int32_t)start) != 0x06000000u ||
+        (uint32_t)MEM_W(4, (gpr)(int32_t)start) != RainStateDl) {
+        return;
+    }
+    uint32_t rects = 0;
+    for (uint32_t at = start + 8; at < end; at += 8) {
+        if (((uint32_t)MEM_W(0, (gpr)(int32_t)at) >> 24) == 0xE4) rects++;  // G_TEXRECT
+    }
+    MEM_W(0, (gpr)(int32_t)start) = 0x06000000u | 0x8000u | std::min<uint32_t>(rects, 0x7FFF);
 }
 
 // The game's handwritten code reads COP0 Count directly (seg2); same clock as osGetCount. Its fight

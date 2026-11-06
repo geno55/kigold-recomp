@@ -34,6 +34,11 @@ void kig_restart_state(uint8_t* rdram, recomp_context* ctx);
 void kig_gfx_track(uint8_t* rdram, recomp_context* ctx, uint32_t site, gpr value);
 void kig_gfx_check(uint8_t* rdram, uint32_t site);
 
+// src/game/kig_hooks.cpp: the rain (func_80028140), on entry and before its return. _end tags the
+// raindrops for RT64 so the Expand aspect ratio draws them across the whole width.
+void kig_rain_begin(uint8_t* rdram, recomp_context* ctx);
+void kig_rain_end(uint8_t* rdram, recomp_context* ctx);
+
 // src/game/kig_hooks.cpp: `mfc0 rt, Count` in game code (N64Recomp patch in patches/n64recomp/).
 uint32_t recomp_cop0_count(void);
 
