@@ -77,6 +77,16 @@ HOOKS = [
     ("func_800288BC", 0x80028D50, "kig_flame_cull_right(rdram, ctx); /* kig: Expand flames */"),
     ("func_800288BC", 0x8002936C, "kig_flame_rect_begin(rdram, ctx); /* kig: Expand flames */"),
     ("func_800288BC", 0x80029448, "kig_flame_rect_end(rdram, ctx); /* kig: Expand flames */"),]
+# Fighter sprites (func_8001ECB4, which N64Recomp also emits as func_8001ED30 from its jump table target):
+# with Expand the sprite moves right where its position is read (0x8001F528), the strip cull widens
+# (0x8001FD78, 0x80020394), and its strips are tagged for RT64 at the exit (0x80020EA0; kig_hooks.cpp).
+HOOKS += [("func_8001ECB4", 0x8001ECB4, "kig_fighter_begin(rdram, ctx); /* kig: Expand fighters */")]
+for _f in ("func_8001ECB4", "func_8001ED30"):
+    HOOKS += [(_f, 0x8001ED30, "kig_fighter_begin(rdram, ctx); /* kig: Expand fighters */"),
+              (_f, 0x8001F528, "kig_fighter_move(rdram, ctx); /* kig: Expand fighters */"),
+              (_f, 0x8001FD78, "kig_fighter_cull(rdram, ctx, 24); /* kig: Expand fighters */"),
+              (_f, 0x80020394, "kig_fighter_cull(rdram, ctx, 15); /* kig: Expand fighters */"),
+              (_f, 0x80020EA0, "kig_fighter_end(rdram, ctx); /* kig: Expand fighters */")]
 
 # Display list pointer check (#7, src/game/kig_hooks.cpp; does nothing unless KIG_PTR_CHECK is set). The
 # fight loop func_8000FAA0 keeps the display list head at 0x8004A318 ($s6 from 0x8001001C) and stores it
@@ -166,12 +176,16 @@ def write_config(trace: bool) -> None:
     if missing:
         print("note: ignored names not in the symbols file: " + ", ".join(missing))
     ignored = sorted((ignored & present) - skipped_funcs())
+    # N64Recomp takes one hook per instruction, so hooks at the same place run in list order in one.
+    merged: dict[tuple[str, int], list[str]] = {}
+    for func, vram, text in HOOKS:
+        merged.setdefault((func, vram), []).append(text)
     hook_text = "".join(f'''
 [[patches.hook]]
 func = "{func}"
 before_vram = 0x{vram:08X}
-text = "{text}"
-''' for func, vram, text in HOOKS)
+text = "{" ".join(texts)}"
+''' for (func, vram), texts in merged.items())
     # Data islands inside handwritten functions (tools/kig_funcs.py): never executed, but N64Recomp
     # translates every word of a function, so they become nops.
     syms = tomllib.loads((ROOT / "syms" / "kig.us.syms.toml").read_text(encoding="utf-8"))

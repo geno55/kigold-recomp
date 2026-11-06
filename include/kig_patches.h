@@ -46,6 +46,14 @@ void kig_flame_cull_right(uint8_t* rdram, recomp_context* ctx);
 void kig_flame_rect_begin(uint8_t* rdram, recomp_context* ctx);
 void kig_flame_rect_end(uint8_t* rdram, recomp_context* ctx);
 
+// src/game/kig_hooks.cpp: the fighter sprites (func_8001ECB4, also entered at 0x8001ED30). With the
+// Expand aspect ratio the sprite moves a screen width right, the strip cull widens, and the strips are
+// tagged for RT64 on the way out. _cull's reg is the bound's register (24 or 15).
+void kig_fighter_begin(uint8_t* rdram, recomp_context* ctx);
+void kig_fighter_move(uint8_t* rdram, recomp_context* ctx);
+void kig_fighter_cull(uint8_t* rdram, recomp_context* ctx, int reg);
+void kig_fighter_end(uint8_t* rdram, recomp_context* ctx);
+
 // src/game/kig_hooks.cpp: `mfc0 rt, Count` in game code (N64Recomp patch in patches/n64recomp/).
 uint32_t recomp_cop0_count(void);
 

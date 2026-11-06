@@ -112,6 +112,61 @@ before_vram = 0x80029448
 text = "kig_flame_rect_end(rdram, ctx); /* kig: Expand flames */"
 
 [[patches.hook]]
+func = "func_8001ECB4"
+before_vram = 0x8001ECB4
+text = "kig_fighter_begin(rdram, ctx); /* kig: Expand fighters */ kig_gfx_check(rdram, 0x8001ECB4u); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_8001ECB4"
+before_vram = 0x8001ED30
+text = "kig_fighter_begin(rdram, ctx); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ECB4"
+before_vram = 0x8001F528
+text = "kig_fighter_move(rdram, ctx); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ECB4"
+before_vram = 0x8001FD78
+text = "kig_fighter_cull(rdram, ctx, 24); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ECB4"
+before_vram = 0x80020394
+text = "kig_fighter_cull(rdram, ctx, 15); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ECB4"
+before_vram = 0x80020EA0
+text = "kig_fighter_end(rdram, ctx); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ED30"
+before_vram = 0x8001ED30
+text = "kig_fighter_begin(rdram, ctx); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ED30"
+before_vram = 0x8001F528
+text = "kig_fighter_move(rdram, ctx); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ED30"
+before_vram = 0x8001FD78
+text = "kig_fighter_cull(rdram, ctx, 24); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ED30"
+before_vram = 0x80020394
+text = "kig_fighter_cull(rdram, ctx, 15); /* kig: Expand fighters */"
+
+[[patches.hook]]
+func = "func_8001ED30"
+before_vram = 0x80020EA0
+text = "kig_fighter_end(rdram, ctx); /* kig: Expand fighters */"
+
+[[patches.hook]]
 func = "func_8000FAA0"
 before_vram = 0x80010048
 text = "kig_gfx_track(rdram, ctx, 0x80010048u, ctx->r25); /* kig: #7 check */"
@@ -295,11 +350,6 @@ text = "kig_gfx_track(rdram, ctx, 0x800114ECu, ctx->r15); /* kig: #7 check */"
 func = "func_8001E0F4"
 before_vram = 0x8001E0F4
 text = "kig_gfx_check(rdram, 0x8001E0F4u); /* kig: #7 check */"
-
-[[patches.hook]]
-func = "func_8001ECB4"
-before_vram = 0x8001ECB4
-text = "kig_gfx_check(rdram, 0x8001ECB4u); /* kig: #7 check */"
 
 [[patches.hook]]
 func = "func_80021BAC"

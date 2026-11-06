@@ -392,6 +392,68 @@ extern "C" void kig_flame_rect_end(uint8_t* rdram, recomp_context* ctx) {
     flame_moved = false;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Fighter sprites. func_8001ECB4(gfx**, ...) (also entered at 0x8001ED30, a separate function for
+// N64Recomp) draws a fighter, and its reflection, as strips of texture rectangles. The sprite's left
+// edge is 0x240($sp) (pixels << 12); strips are skipped unless the sprite's left edge is below 320
+// (0x8001FD78, 0x80020394), and strip x < 0 is drawn from 0. So with the Expand aspect ratio a fighter
+// past either edge of the 4:3 area was cut off at that edge. With Expand:
+// - the sprite moves a screen width right where its position is read (0x8001F528), so no strip is left
+//   of 0, and the strip cull allows the moved sprite up to 600 pixels (it stays encodable: < 1024);
+// - on the way out (0x80020EA0), every G_TEXRECT the call wrote is tagged as the torch flames' are
+//   (bit 31: clip to the wide screen, bit 30: moved, draw a screen width left; RT64 patch 0005).
+// ---------------------------------------------------------------------------------------------
+namespace {
+    bool fighter_moved = false;  // this call moved its sprite (game thread only)
+    uint32_t fighter_gfx = 0;    // the display list head when it did
+}
+
+// On entry (0x8001ECB4, and 0x8001ED30).
+extern "C" void kig_fighter_begin(uint8_t* rdram, recomp_context* ctx) {
+    (void)rdram;
+    (void)ctx;
+    fighter_moved = false;
+}
+
+// Before 0x8001F528: $t5 = 0x240($sp), the sprite's left edge.
+extern "C" void kig_fighter_move(uint8_t* rdram, recomp_context* ctx) {
+    fighter_moved = false;
+    if (!expand_on()) {
+        return;
+    }
+    const int32_t x = (int32_t)ctx->r13 + (320 << 12);
+    ctx->r13 = (gpr)x;
+    MEM_W(0x240, ctx->r29) = x;
+    fighter_gfx = (uint32_t)MEM_W(0, (gpr)MEM_W(0x2D0, ctx->r29));  // *gfx (written back on the way out)
+    fighter_moved = true;
+}
+
+// Before 0x8001FD78 ($t8) and 0x80020394 ($t7): the strip cull's right bound, 320 << *0x8005A918.
+extern "C" void kig_fighter_cull(uint8_t* rdram, recomp_context* ctx, int reg) {
+    (void)rdram;
+    if (fighter_moved) {
+        gpr& bound = reg == 24 ? ctx->r24 : ctx->r15;
+        bound = (gpr)(int32_t)(((int32_t)bound / 320) * (320 + 600));
+    }
+}
+
+// Before 0x80020EA0, the common exit (*gfx was written back just before, if anything was drawn).
+extern "C" void kig_fighter_end(uint8_t* rdram, recomp_context* ctx) {
+    if (!fighter_moved) {
+        return;
+    }
+    fighter_moved = false;
+    const uint32_t start = fighter_gfx, end = (uint32_t)MEM_W(0, (gpr)MEM_W(0x2D0, ctx->r29));
+    if (start == 0 || end <= start || end - start > 0x10000) {
+        return;
+    }
+    for (uint32_t at = start; at < end; at += 8) {
+        if (((uint32_t)MEM_W(0, (gpr)(int32_t)at) >> 24) == 0xE4) {  // G_TEXRECT
+            MEM_W(4, (gpr)(int32_t)at) = (int32_t)((uint32_t)MEM_W(4, (gpr)(int32_t)at) | 0xC0000000u);
+        }
+    }
+}
+
 // The game's handwritten code reads COP0 Count directly (seg2); same clock as osGetCount. Its fight
 // RNG (seg2 func_801B6578, state at 0x801D88A8) mixes Count in on every call, so fights depend on
 // host timing. KIG_COUNT_SEED=<n> (testing) makes those reads a fixed sequence instead, so a seed
