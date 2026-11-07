@@ -221,6 +221,63 @@ extern "C" void kig_restart_state(uint8_t* rdram, recomp_context* ctx) {
     longjmp(*restart_targets.back(), 1);
 }
 
+// Fight frame early exits (#7; hooks in tools/gen_config.py). seg2_801AE460, the fight's per-frame
+// routine, saves every register in its frame and its $sp at 0x801D9FF8. Code it calls can end the frame
+// by jumping to its exit, seg2_801AE6B4: that restores every register from the frame and does `jr $ra`,
+// which on the N64 returns straight to 0x801AE460's caller. Here the jumps are tail calls, so that
+// return used to land back in 0x801AE460 after its call to the entity loop; the rest of the frame then ran
+// on its caller's stack, overwrote the register save area, and its own epilogue restored garbage,
+// including $sp (crashes in the next fight's input code, func_80011824). Now the frame runs under setjmp,
+// and the exit longjmps back here with the registers it restored, as the hardware's return does.
+extern "C" void seg2_801AE460(uint8_t* rdram, recomp_context* ctx);
+namespace {
+    struct FightFrame {
+        jmp_buf exit;
+        size_t restart_depth;  // restart_targets.size() at entry
+    };
+    thread_local std::vector<FightFrame*> fight_frames;
+    thread_local bool fight_frame_entering = false;
+}
+
+extern "C" int kig_fight_frame(uint8_t* rdram, recomp_context* ctx) {
+    if (fight_frame_entering) {
+        fight_frame_entering = false;
+        return 0;  // the call below: run the frame's code
+    }
+    FightFrame frame;
+    frame.restart_depth = restart_targets.size();
+    // A native frame between recompiled ones (see kig_dispatch_entity): marked, and the depth reset after
+    // the longjmp, which skips the pops of the frames it leaves.
+    RecompShadowStack* ss = recomp_ss_self();
+    const uint32_t ss_depth = ss->depth;
+    if (ss_depth < RECOMP_SS_MAX) {
+        ss->e[ss_depth] = { RECOMP_SS_NATIVE_FRAME, 0 };
+    }
+    ss->depth = ss_depth + 1;
+    fight_frames.push_back(&frame);
+    if (setjmp(frame.exit) == 0) {
+        fight_frame_entering = true;
+        seg2_801AE460(rdram, ctx);
+    } else {
+        restart_targets.resize(frame.restart_depth);  // entity dispatches the exit left
+    }
+    fight_frames.pop_back();
+    ss->depth = ss_depth;
+    return 1;
+}
+
+extern "C" void kig_fight_frame_exit(uint8_t* rdram, recomp_context* ctx) {
+    if (fight_frames.empty()) {
+        return;  // not under kig_fight_frame: the jr returns as before
+    }
+    static std::atomic<int> logged{ 0 };
+    if (logged.fetch_add(1) < 3) {
+        fprintf(stderr, "[kig] fight frame early exit at t=%.2f\n", kig::input::script_time());
+    }
+    ctx->r2 = MEM_B(-0X778A, ctx->r2);  // the jr's delay slot: lb $v0, -0x778A($v0)
+    longjmp(fight_frames.back()->exit, 1);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Display list pointer check for #7 (KIG_PTR_CHECK; hooks in tools/gen_config.py). Crash reports show
 // the fight loop's display list head (0x8004A318) holding 0x06000000, the first word of a G_DL command:
@@ -288,6 +345,51 @@ extern "C" void kig_gfx_track(uint8_t* rdram, recomp_context* ctx, uint32_t site
     const uint32_t i = gfx_ring_next.fetch_add(1);
     gfx_ring[i % GfxRing] = { site, (uint32_t)value };
     gfx_validate(rdram, site, (uint32_t)value, true);
+}
+
+extern "C" void kig_pad_check(uint8_t* rdram, recomp_context* ctx, uint32_t site, gpr index) {
+    if (!gfx_check_on) {
+        return;
+    }
+    const uint32_t sp = (uint32_t)ctx->r29;
+    const uint32_t table = (uint32_t)MEM_W(0x68, ctx->r29);
+    const uint32_t i = (uint32_t)index;
+    bool ok = table == 0x800683C0u && i < 4;
+    uint32_t entry = 0;
+    if (ok) {
+        entry = (uint32_t)MEM_W(0, (gpr)(int32_t)(table + i * 4));
+        ok = entry >= 0x800683A8u && entry <= 0x800683BAu;
+    }
+    static std::atomic<bool> reported{ false };
+    if (ok || reported.exchange(true)) {
+        return;
+    }
+    std::fprintf(stderr, "[kig] controller check t=%.3f at %08X: index %u, table %08X (0x68($sp), sp %08X), entry %08X\n",
+                 kig::input::script_time(), site, i, table, sp, entry);
+    std::fprintf(stderr, "[kig]   regs: s0 %08X s1 %08X s2 %08X s3 %08X s4 %08X s5 %08X s6 %08X v0 %08X v1 %08X a0 %08X ra %08X\n",
+                 (uint32_t)ctx->r16, (uint32_t)ctx->r17, (uint32_t)ctx->r18, (uint32_t)ctx->r19, (uint32_t)ctx->r20,
+                 (uint32_t)ctx->r21, (uint32_t)ctx->r22, (uint32_t)ctx->r2, (uint32_t)ctx->r3, (uint32_t)ctx->r4, (uint32_t)ctx->r31);
+    std::fprintf(stderr, "[kig]   frame (sp+0 .. sp+0x7C):");
+    for (uint32_t o = 0; o < 0x80; o += 4) {
+        std::fprintf(stderr, "%s%08X", (o % 32) == 0 ? "\n[kig]    " : " ", (uint32_t)MEM_W(o, ctx->r29));
+    }
+    std::fprintf(stderr, "\n[kig]   table 800683A0..800683DC:");
+    for (uint32_t a = 0x800683A0u; a < 0x800683E0u; a += 4) {
+        std::fprintf(stderr, " %08X", (uint32_t)MEM_W(0, (gpr)(int32_t)a));
+    }
+    RecompShadowStack* ss = recomp_ss_self();
+    std::fprintf(stderr, "\n[kig]   call chain:");
+    for (uint32_t d = 0; d < ss->depth && d < RECOMP_SS_MAX; d++) {
+        std::fprintf(stderr, " %08X", ss->e[d].site);
+    }
+    std::fprintf(stderr, "\n");
+    const std::filesystem::path dump = kig::log::dir() / "ptrcheck-rdram.bin";
+    if (FILE* f = std::fopen(dump.string().c_str(), "wb")) {
+        std::fwrite(rdram, 1, 0x800000, f);
+        std::fclose(f);
+        std::fprintf(stderr, "[kig]   RDRAM saved to %s\n", dump.string().c_str());
+    }
+    kig::log::flush();
 }
 
 extern "C" void kig_gfx_check(uint8_t* rdram, uint32_t site) {

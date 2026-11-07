@@ -33,6 +33,8 @@ void kig_restart_state(uint8_t* rdram, recomp_context* ctx);
 // reported with the recent stores, the call chain and an RDRAM dump.
 void kig_gfx_track(uint8_t* rdram, recomp_context* ctx, uint32_t site, gpr value);
 void kig_gfx_check(uint8_t* rdram, uint32_t site);
+// The same for the controller data pointers func_80011824 reads (index: the table index about to be used).
+void kig_pad_check(uint8_t* rdram, recomp_context* ctx, uint32_t site, gpr index);
 
 // src/game/kig_hooks.cpp: the rain (func_80028140), on entry and before its return. _end tags the
 // raindrops for RT64 so the Expand aspect ratio draws them across the whole width.
@@ -53,6 +55,12 @@ void kig_fighter_begin(uint8_t* rdram, recomp_context* ctx);
 void kig_fighter_move(uint8_t* rdram, recomp_context* ctx);
 void kig_fighter_cull(uint8_t* rdram, recomp_context* ctx, int reg);
 void kig_fighter_end(uint8_t* rdram, recomp_context* ctx);
+
+// src/game/kig_hooks.cpp: fight frame early exits. _frame (at seg2 0x801AE460's entry) runs the frame
+// under setjmp and returns 1 when it has run (the hook then returns); _exit (before 0x801AE6B4's jr)
+// leaves the frame from wherever it was jumped to.
+int kig_fight_frame(uint8_t* rdram, recomp_context* ctx);
+void kig_fight_frame_exit(uint8_t* rdram, recomp_context* ctx);
 
 // src/game/kig_hooks.cpp: `mfc0 rt, Count` in game code (N64Recomp patch in patches/n64recomp/).
 uint32_t recomp_cop0_count(void);

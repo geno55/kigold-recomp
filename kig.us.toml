@@ -82,6 +82,16 @@ before_vram = 0x801BE790
 text = "MEM_B(0X8C, ctx->r30) = ctx->r7; kig_restart_state(rdram, ctx); return; /* kig: state restart */"
 
 [[patches.hook]]
+func = "seg2_801AE460"
+before_vram = 0x801AE460
+text = "if (kig_fight_frame(rdram, ctx)) return; /* kig: fight frame early exits */"
+
+[[patches.hook]]
+func = "seg2_801AE6B4"
+before_vram = 0x801AE79C
+text = "kig_fight_frame_exit(rdram, ctx); /* kig: fight frame early exit */"
+
+[[patches.hook]]
 func = "func_80028140"
 before_vram = 0x80028140
 text = "kig_rain_begin(rdram, ctx); /* kig: Expand rain */"
@@ -345,6 +355,16 @@ text = "kig_gfx_track(rdram, ctx, 0x800114D4u, ctx->r25); /* kig: #7 check */"
 func = "func_8000FAA0"
 before_vram = 0x800114EC
 text = "kig_gfx_track(rdram, ctx, 0x800114ECu, ctx->r15); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_80011824"
+before_vram = 0x8001196C
+text = "kig_pad_check(rdram, ctx, 0x8001196Cu, ctx->r3); /* kig: #7 check */"
+
+[[patches.hook]]
+func = "func_80011824"
+before_vram = 0x80011D3C
+text = "kig_pad_check(rdram, ctx, 0x80011D3Cu, ctx->r17); /* kig: #7 check */"
 
 [[patches.hook]]
 func = "func_8001E0F4"

@@ -66,6 +66,14 @@ HOOKS = [
     ("seg2_801AFD44", 0x801AFD64, "kig_dispatch_entity(rdram, ctx); return; /* kig: entity dispatch */"),
     ("seg2_801BE720", 0x801BE74C, "ctx->r6 = ADD32(0, 0X22); kig_restart_state(rdram, ctx); return; /* kig: state restart */"),
     ("seg2_801BE784", 0x801BE790, "MEM_B(0X8C, ctx->r30) = ctx->r7; kig_restart_state(rdram, ctx); return; /* kig: state restart */"),
+    # Fight frame early exits (#7, src/game/kig_hooks.cpp): seg2_801AE460 saves every register and keeps
+    # its $sp at 0x801D9FF8; code it calls (the entity loop's exits via 0x801BDA58) can jump to its exit
+    # 0x801AE6B4, which restores them all and returns to its caller. As C calls, that return went back into
+    # 0x801AE460 instead, which ran the rest of the frame on its caller's stack, over its own register save
+    # area, and then restored garbage (a misaligned $sp: crash at the next fight's input code). The frame
+    # now runs under setjmp, and the exit (before its jr, its delay slot done) longjmps out of it.
+    ("seg2_801AE460", 0x801AE460, "if (kig_fight_frame(rdram, ctx)) return; /* kig: fight frame early exits */"),
+    ("seg2_801AE6B4", 0x801AE79C, "kig_fight_frame_exit(rdram, ctx); /* kig: fight frame early exit */"),
     # Rain (func_80028140(gfx), Maya's stage): its drops are tagged for RT64's Expand aspect ratio after
     # they are written, before the jr $ra at 0x800284C4 (src/game/kig_hooks.cpp).
     ("func_80028140", 0x80028140, "kig_rain_begin(rdram, ctx); /* kig: Expand rain */"),
@@ -104,6 +112,11 @@ GFX_HEAD_STORES = [
 ]
 HOOKS += [("func_8000FAA0", vram, f"kig_gfx_track(rdram, ctx, 0x{vram:08X}u, ctx->r{reg}); /* kig: #7 check */")
           for vram, reg in GFX_HEAD_STORES]
+# Controller pointer check (#7): func_80011824 reads the controller data pointers from the table whose
+# address it keeps at 0x68($sp) (0x800683C0, from func_8002B5B0), at index $v1 (0x8001196C) and, in its
+# per-player loop (head 0x80011D3C), index $s1.
+HOOKS += [("func_80011824", 0x8001196C, "kig_pad_check(rdram, ctx, 0x8001196Cu, ctx->r3); /* kig: #7 check */"),
+          ("func_80011824", 0x80011D3C, "kig_pad_check(rdram, ctx, 0x80011D3Cu, ctx->r17); /* kig: #7 check */")]
 HOOKS += [(name, vram, f"kig_gfx_check(rdram, 0x{vram:08X}u); /* kig: #7 check */")
           for name, vram in [("func_8001E0F4", 0x8001E0F4), ("func_8001ECB4", 0x8001ECB4),
                              ("func_80021BAC", 0x80021BAC), ("func_800131F4", 0x800131F4)]]
@@ -256,7 +269,7 @@ def write_decls() -> int:
         text = f.read_text()
         called |= set(re.findall(r"\b(\w+)\(rdram, ctx\)", text))
         defined |= set(re.findall(r"^RECOMP_FUNC void (\w+)\(", text, re.M))
-    patch_decls = set(re.findall(r"^void (\w+)\(", (ROOT / "include" / "kig_patches.h").read_text(), re.M))
+    patch_decls = set(re.findall(r"^(?:void|int) (\w+)\(", (ROOT / "include" / "kig_patches.h").read_text(), re.M))
     missing = sorted(called - declared - defined - patch_decls - {"LOOKUP_FUNC"})
     sl = ROOT / "lib/N64Recomp/src/symbol_lists.cpp"
     skipped = list_from_cpp(sl, "reimplemented_funcs") | list_from_cpp(sl, "ignored_funcs")

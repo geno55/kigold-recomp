@@ -39,6 +39,18 @@ changes nothing visible. Here it held the stale 0x800495A0, the static viewport 
 store blanked for good: the stage vanished late in the victory pose (a black floor), and in the next
 fight the fireplace flames were drawn beside the fireplace. Calls now set `$ra` as the hardware does.
 
+That early exit had a second effect, which crashed the game at the end of matches (issue 7, often in
+Team Elimination's winning pose). The fight's per-frame routine, seg2 0x801AE460, saves every register in
+its frame and its `$sp` at 0x801D9FF8. The entity loop it calls can end the frame by jumping (via
+0x801BDA58) to the routine's exit at 0x801AE6B4, which restores the registers and returns with `jr $ra`;
+on the N64 that leaves the routine. Recompiled, those jumps are tail calls, so the return went back into
+0x801AE460 after its call to the entity loop. The rest of the frame then ran on its caller's stack,
+over its own register save area, and its epilogue restored garbage, including a misaligned `$sp`. The
+next frame's input code, func_80011824, then read a controller pointer through it and crashed (a crash
+reporter's save state reproduced this). The issue's other crashes, through a bad display list pointer,
+fit the same garbage registers but weren't reproduced. Now the routine runs under setjmp and the exit longjmps out
+(`kig_fight_frame` in `src/game/kig_hooks.cpp`), the same way the fighter state restarts are handled.
+
 RT64 gets one patch (`patches/rt64/`, also applied at configure time) for raw RDP triangles. They are
 drawn as the two trapezoids the RDP fills, not as one triangle, which matters because the fight sky is
 sent as a rectangle. They are also clipped to the scissor before drawing, which fixes the flickering
