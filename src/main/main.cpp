@@ -668,6 +668,13 @@ int main(int argc, char** argv) {
     cfg.gfx_callbacks = { .create_gfx = create_gfx, .create_window = create_window, .update_gfx = update_gfx };
     cfg.error_handling_callbacks = { .message_box = message_box };
     cfg.threads_callbacks = { .get_game_thread_name = game_thread_name };
+    // SI (controller read done) messages that find the game's queue full are dropped, as the N64's
+    // interrupt handler does (osSendMesg with OS_MESG_NOBLOCK). ultramodern's default keeps such a message
+    // and retries it forever. KI Gold starts more controller reads than it waits for (one extra at each
+    // fight start), so its 8-message SI queue fills after several fights; from then on every extra message
+    // stayed in the external queue, the idle thread spun retrying the growing backlog, and VI and audio
+    // events waited behind it: the game stuttered more and more (#10).
+    cfg.message_queue_control.requeue_si = false;
     // Game-time clock for input scripts, captures and the frame log (kig::input::script_time).
     // Step scripts run on the same VIs, before a capture they request holds the game.
     cfg.events_callbacks = { .vi_callback = [] {
