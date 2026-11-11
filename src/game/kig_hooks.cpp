@@ -556,6 +556,68 @@ extern "C" void kig_fighter_end(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Large poses (the 640x480 select and versus screens). seg1_801BDB40 draws a fighter's pose as columns
+// of texture rectangles, and seg1_801BD180 its extra pieces (Orchid's head and hands) the same way. Each
+// clamps a rectangle's right x to 640 and its left x to 0, moving the texture s to match. So with the
+// Expand aspect ratio a fighter sliding in from the right was cut off at the 4:3 edge: columns past it
+// came out empty (left 752, right 640). With Expand, after each rectangle and its RDPHALF_2 (s, t) are
+// written:
+// - its x come from the unclamped values (the game emits columns up to x = 942, still encodable: < 1024);
+// - a column left of 0 moves a screen width right, with its unclamped s;
+// - it gets the torch flames' RT64 tag (bit 31: clip to the wide screen, bit 30: moved, draw it a screen
+//   width left; RT64 patch 0005).
+// ---------------------------------------------------------------------------------------------
+namespace {
+    // ulx, lrx: the unclamped x (10.2); s: the unclamped s (s10.5).
+    void pose_rect(uint8_t* rdram, uint32_t rect, uint32_t half2, int32_t ulx, int32_t lrx, uint32_t s) {
+        constexpr int32_t ScreenWidth = 640 << 2;  // the clamps: these screens are 640 wide
+        const bool moved = ulx < 0;
+        if (moved) {
+            ulx += ScreenWidth;
+            lrx += ScreenWidth;
+        }
+        if (ulx < 0 || ulx > 0xFFF || lrx <= ulx) {
+            return;  // more than a screen width off either side: leave it as the game drew it
+        }
+        lrx = std::min(lrx, 0xFFF);
+        const uint32_t w0 = (uint32_t)MEM_W(0, (gpr)(int32_t)rect), w1 = (uint32_t)MEM_W(4, (gpr)(int32_t)rect);
+        if ((w0 >> 24) != 0xE4 || ((uint32_t)MEM_W(0, (gpr)(int32_t)half2) >> 24) != 0xB3) {
+            return;
+        }
+        MEM_W(0, (gpr)(int32_t)rect) = (int32_t)((w0 & 0xFF000FFFu) | ((uint32_t)lrx << 12));
+        MEM_W(4, (gpr)(int32_t)rect) = (int32_t)((w1 & 0x07000FFFu) | ((uint32_t)ulx << 12) | 0x80000000u | (moved ? 0x40000000u : 0u));
+        if (moved) {
+            const uint32_t st = (uint32_t)MEM_W(4, (gpr)(int32_t)half2);
+            MEM_W(4, (gpr)(int32_t)half2) = (int32_t)((st & 0xFFFFu) | (s << 16));
+        }
+    }
+}
+
+// seg1_801BDB40, before 0x801BE0EC: the G_TEXRECT is at $t1 and its RDPHALF_2 at $a2. The left x is $s5
+// (10.2); the right is ($f26 + $f28 + 0xF0($sp)) * 4 before its clamp (0x801BDEA8); s before its
+// correction (0x801BE0DC) is at 0x6C($sp).
+extern "C" void kig_pose_column(uint8_t* rdram, recomp_context* ctx) {
+    if (!expand_on()) {
+        return;
+    }
+    const uint32_t step_bits = (uint32_t)MEM_W(0xF0, ctx->r29);
+    float step;
+    std::memcpy(&step, &step_bits, sizeof(step));
+    const float right = (ctx->f26.fl + ctx->f28.fl + step) * 4.0f;
+    pose_rect(rdram, (uint32_t)ctx->r9, (uint32_t)ctx->r6, (int32_t)ctx->r21, (int32_t)right, (uint32_t)MEM_W(0x6C, ctx->r29));
+}
+
+// seg1_801BD180, before 0x801BDA9C: the G_TEXRECT is 8 bytes before the RDPHALF_2 at $a3. The left and
+// right x are at 0x9C($sp) and 0x98($sp) (clamped at 0x801BD4CC); s before its correction is at 0x74($sp).
+extern "C" void kig_pose_rect(uint8_t* rdram, recomp_context* ctx) {
+    if (!expand_on()) {
+        return;
+    }
+    pose_rect(rdram, (uint32_t)ctx->r7 - 8, (uint32_t)ctx->r7, (int32_t)MEM_W(0x9C, ctx->r29), (int32_t)MEM_W(0x98, ctx->r29),
+              (uint32_t)MEM_W(0x74, ctx->r29));
+}
+
 // The game's handwritten code reads COP0 Count directly (seg2); same clock as osGetCount. Its fight
 // RNG (seg2 func_801B6578, state at 0x801D88A8) mixes Count in on every call, so fights depend on
 // host timing. KIG_COUNT_SEED=<n> (testing) makes those reads a fixed sequence instead, so a seed

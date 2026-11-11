@@ -177,6 +177,16 @@ before_vram = 0x80020EA0
 text = "kig_fighter_end(rdram, ctx); /* kig: Expand fighters */"
 
 [[patches.hook]]
+func = "seg1_801BDB40"
+before_vram = 0x801BE0EC
+text = "kig_pose_column(rdram, ctx); /* kig: Expand poses */"
+
+[[patches.hook]]
+func = "seg1_801BD180"
+before_vram = 0x801BDA9C
+text = "kig_pose_rect(rdram, ctx); /* kig: Expand poses */"
+
+[[patches.hook]]
 func = "func_8000FAA0"
 before_vram = 0x80010048
 text = "kig_gfx_track(rdram, ctx, 0x80010048u, ctx->r25); /* kig: #7 check */"

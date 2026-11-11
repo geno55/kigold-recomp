@@ -56,6 +56,12 @@ void kig_fighter_move(uint8_t* rdram, recomp_context* ctx);
 void kig_fighter_cull(uint8_t* rdram, recomp_context* ctx, int reg);
 void kig_fighter_end(uint8_t* rdram, recomp_context* ctx);
 
+// src/game/kig_hooks.cpp: the large select and versus screen poses (columns: seg1_801BDB40, extra
+// pieces: seg1_801BD180). With the Expand aspect ratio each rectangle keeps its x past the 4:3 edges and
+// is tagged for RT64.
+void kig_pose_column(uint8_t* rdram, recomp_context* ctx);
+void kig_pose_rect(uint8_t* rdram, recomp_context* ctx);
+
 // src/game/kig_hooks.cpp: fight frame early exits. _frame (at seg2 0x801AE460's entry) runs the frame
 // under setjmp and returns 1 when it has run (the hook then returns); _exit (before 0x801AE6B4's jr)
 // leaves the frame from wherever it was jumped to.

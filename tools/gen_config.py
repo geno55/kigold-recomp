@@ -95,6 +95,11 @@ for _f in ("func_8001ECB4", "func_8001ED30"):
               (_f, 0x8001FD78, "kig_fighter_cull(rdram, ctx, 24); /* kig: Expand fighters */"),
               (_f, 0x80020394, "kig_fighter_cull(rdram, ctx, 15); /* kig: Expand fighters */"),
               (_f, 0x80020EA0, "kig_fighter_end(rdram, ctx); /* kig: Expand fighters */")]
+# Large poses (the select and versus screens: seg1_801BDB40 draws the columns, seg1_801BD180 the extra
+# pieces): with Expand each rectangle gets its unclamped x and the RT64 tag once it is written
+# (kig_hooks.cpp).
+HOOKS += [("seg1_801BDB40", 0x801BE0EC, "kig_pose_column(rdram, ctx); /* kig: Expand poses */"),
+          ("seg1_801BD180", 0x801BDA9C, "kig_pose_rect(rdram, ctx); /* kig: Expand poses */")]
 
 # Display list pointer check (#7, src/game/kig_hooks.cpp; does nothing unless KIG_PTR_CHECK is set). The
 # fight loop func_8000FAA0 keeps the display list head at 0x8004A318 ($s6 from 0x8001001C) and stores it
