@@ -1,0 +1,114 @@
+diff --git a/src/gbi/rt64_gbi_rdp.cpp b/src/gbi/rt64_gbi_rdp.cpp
+index 136c120..34eb41e 100644
+--- a/src/gbi/rt64_gbi_rdp.cpp
++++ b/src/gbi/rt64_gbi_rdp.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "rt64_gbi_rdp.h"
+ 
++#include <cfloat>
++
+ #include "../include/rt64_extended_gbi.h"
+ 
+ #include "rt64_f3d.h"
+@@ -346,6 +348,7 @@ namespace RT64 {
+             float edgeYh = 0.0f, edgeYm = 0.0f, edgeYl = 0.0f, edgeYFloor = 0.0f;
+             float edgeXh = 0.0f, edgeDxh = 0.0f, edgeXm = 0.0f, edgeDxm = 0.0f, edgeXl = 0.0f, edgeDxl = 0.0f;
+             bool anyTextured = false;
++            bool anyShaded = false;  // kig patch: see the cells below
+ 
+             for (const DisplayList* curData : triangles) {
+                 uint32_t commandId = (curData[0].w0 >> 24) & 0x3F;
+@@ -434,6 +437,7 @@ namespace RT64 {
+                 edgeXh = xh; edgeDxh = dxhdy; edgeXm = xm; edgeDxm = dxmdy; edgeXl = xl; edgeDxl = dxldy;
+ 
+                 if (shaded) {
++                    anyShaded = true;
+                     hlslpp::int4 baseColorFixed{
+                         ((curData[0].w0 >> 16) << 16) | (curData[2].w0 >> 16),
+                         ((curData[0].w0 & 0xFFFF) << 16) | (curData[2].w0 & 0xFFFF),
+@@ -722,6 +726,84 @@ namespace RT64 {
+                 clipAndAdd(lower, 4);
+             }
+ 
++            // kig patch: the GPU interpolates colour perspective-correctly, using the W that gives the texture its
++            // perspective, but the RDP interpolates shade linearly on screen. Across a triangle whose W varies a lot
++            // (KI Gold's training stage sky: W from 8538 at the top to 106 at the horizon) the colour of the far
++            // vertex then covered almost everything, so the sky's black-to-brown gradient came out black. Such a
++            // triangle, when its colour varies, is cut into cells across which W changes by under 5%; every cut is
++            // evaluated exactly on the planes, so what is left of the skew is too small to see.
++            if (anyShaded && anyTextured && texturePerspective && !clippedTris.empty()) {
++                bool colorVaries = false;
++                for (int c = 0; c < 4; c++) {
++                    colorVaries = colorVaries || (planeDe[c] != 0.0f) || (planeDx[c] != 0.0f);
++                }
++
++                float minW = FLT_MAX, maxW = 0.0f;
++                float minX = FLT_MAX, maxX = -FLT_MAX, minY = FLT_MAX, maxY = -FLT_MAX;
++                for (const ClipVertex &v : clippedTris) {
++                    minW = std::min(minW, std::fabs(v.w)); maxW = std::max(maxW, std::fabs(v.w));
++                    minX = std::min(minX, v.x); maxX = std::max(maxX, v.x);
++                    minY = std::min(minY, v.y); maxY = std::max(maxY, v.y);
++                }
++
++                constexpr float MaxRatio = 1.05f;
++                if (colorVaries && (minW > 0.0f) && (maxW > minW * MaxRatio)) {
++                    auto wAt = [&](float x, float y) {
++                        return std::fabs(planeBase[6] + planeDe[6] * (y - edgeYFloor) + planeDx[6] * (x - xOnH(y)));
++                    };
++                    auto ratioOver = [&](float x0, float y0, float x1, float y1) {
++                        const float w[4] = { wAt(x0, y0), wAt(x1, y0), wAt(x0, y1), wAt(x1, y1) };
++                        const float lo = std::min(std::min(w[0], w[1]), std::min(w[2], w[3]));
++                        const float hi = std::max(std::max(w[0], w[1]), std::max(w[2], w[3]));
++                        return (lo > 0.0f) ? (hi / lo) : FLT_MAX;
++                    };
++
++                    // Cells: rows from the top, as tall as W allows (1 to 64 lines), then columns within a row.
++                    constexpr int MaxCells = 4096;
++                    std::vector<ClipVertex> source;
++                    source.swap(clippedTris);
++                    const float savedBounds[4] = { clipBounds[0], clipBounds[1], clipBounds[2], clipBounds[3] };
++                    int cells = 0;
++                    float y0 = std::floor(minY);
++                    for (; (y0 < maxY) && (cells < MaxCells);) {
++                        float h = 64.0f;
++                        while ((h > 1.0f) && (ratioOver(minX, y0, maxX, y0 + h) > MaxRatio)) {
++                            h *= 0.5f;
++                        }
++
++                        const float y1 = std::min(y0 + h, maxY);
++                        for (float x0 = minX; (x0 < maxX) && (cells < MaxCells);) {
++                            float w = maxX - x0;
++                            while ((w > 1.0f) && (ratioOver(x0, y0, x0 + w, y1) > MaxRatio)) {
++                                w *= 0.5f;
++                            }
++
++                            const float x1 = std::min(x0 + w, maxX);
++                            clipBounds[0] = std::max(savedBounds[0], x0); clipBounds[1] = std::max(savedBounds[1], y0);
++                            clipBounds[2] = std::min(savedBounds[2], x1); clipBounds[3] = std::min(savedBounds[3], y1);
++                            for (size_t t = 0; t + 2 < source.size(); t += 3) {
++                                ClipVertex cell[12] = { source[t], source[t + 1], source[t + 2] };
++                                clipAndAdd(cell, 3);
++                            }
++
++                            cells++;
++                            x0 = x1;
++                        }
++
++                        y0 = y1;
++                    }
++
++                    for (int i = 0; i < 4; i++) {
++                        clipBounds[i] = savedBounds[i];
++                    }
++
++                    // Too many cells: draw it uncut rather than lose the rest of it.
++                    if (y0 < maxY) {
++                        clippedTris.swap(source);
++                    }
++                }
++            }
++
+             if (!clippedTris.empty()) {
+                 const size_t vertCount = clippedTris.size();
+                 setMinSize(posWorkBuffer, vertCount);
