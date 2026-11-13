@@ -1,6 +1,6 @@
 
 cmake_minimum_required(VERSION 3.20)
-project(KIGRecomp VERSION 0.3.2 LANGUAGES C CXX)
+project(KIGRecomp VERSION 0.3.3 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 20)
