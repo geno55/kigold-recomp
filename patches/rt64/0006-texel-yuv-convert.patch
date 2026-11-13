@@ -1,0 +1,98 @@
+diff --git a/src/shaders/RasterPS.hlsl b/src/shaders/RasterPS.hlsl
+index e7895c3..61a5687 100644
+--- a/src/shaders/RasterPS.hlsl
++++ b/src/shaders/RasterPS.hlsl
+@@ -45,6 +45,30 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
+ }
+ #endif
+ 
++// kig patch: the RDP texture filter's YUV-to-RGB conversion of one texel, as angrylion's texture_pipeline_cycle
++// does it: Y is the texel's blue, U its red and V its green; K0-K3 are SETCONVERT's 9-bit signed constants,
++// used as 2K+1. The results are 9 bits, read by the combiner as -128..383 (the RDP's 9-bit extension).
++int convertExtend9(int v) {
++    v &= 0x1FF;
++    return ((v & 0x180) == 0x180) ? (v - 0x200) : v;
++}
++
++float4 convertTexel(float4 texel, int convertK[4]) {
++    const int y = int(round(texel.b * 255.0f));
++    const int u = int(round(texel.r * 255.0f));
++    const int v = int(round(texel.g * 255.0f));
++    int k[4];
++    for (int i = 0; i < 4; i++) {
++        const int k9 = convertK[i] & 0x1FF;
++        k[i] = (((k9 & 0x100) != 0) ? (k9 - 0x200) : k9) * 2 + 1;
++    }
++
++    const int r = y + ((k[0] * v + 0x80) >> 8);
++    const int g = y + ((k[1] * u + k[2] * v + 0x80) >> 8);
++    const int b = y + ((k[3] * u + 0x80) >> 8);
++    return float4(convertExtend9(r), convertExtend9(g), convertExtend9(b), convertExtend9(y)) / 255.0f;
++}
++
+ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float2 vertexUV, float4 vertexSmoothColor, float4 vertexFlatColor,
+     bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
+ {
+@@ -132,6 +156,8 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+ 
+     float4 texVal0 = float4(0.0f, 0.0f, 0.0f, 1.0f);
+     float4 texVal1 = float4(0.0f, 0.0f, 0.0f, 1.0f);
++    int texFmt0 = 0;
++    int texFmt1 = 0;
+     if (renderFlagUsesTexture0(rp.flags)) {
+         const uint globalTileIndex = instanceRenderIndices[gConstants.renderIndex].rdpTileIndex + tileIndex0;
+         RDPTile rdpTile = RDPTiles[globalTileIndex];
+@@ -144,6 +170,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+         const GPUTile gpuTile = GPUTiles[globalTileIndex];
+         const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
+         texVal0 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, false);
++        texFmt0 = rdpTile.fmt;
+     }
+     
+     if (renderFlagUsesTexture1(rp.flags)) {
+@@ -160,8 +187,44 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+         const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
+         const uint nativeSampler = renderFlagNativeSampler1(rp.flags);
+         texVal1 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, oneCycleHardwareBug);
++        texFmt1 = rdpTile.fmt;
+     }
+-    
++
++    // kig patch: the texture filter's YUV-to-RGB conversion (other mode bits 9-11: convert_one, bi_lerp_1,
++    // bi_lerp_0). A cycle whose bi_lerp bit is clear converts its texel instead of filtering it, whatever
++    // the texture's format; with convert_one, the second cycle converts the first cycle's texel. Killer
++    // Instinct Gold draws its projectiles and smoke this way from RGBA16 textures (bi_lerp_1 clear), so
++    // without it they came out as flat blobs. YUV textures are already converted when decoded, so they
++    // are left alone.
++    if (renderFlagUsesTexture0(rp.flags) || renderFlagUsesTexture1(rp.flags)) {
++        const uint cycleType = otherMode.cycleType();
++        const bool biLerp0 = ((otherMode.H >> 11) & 1) != 0;
++        const bool biLerp1 = ((otherMode.H >> 10) & 1) != 0;
++        const bool convertOne = ((otherMode.H >> 9) & 1) != 0;
++        const int convertK[4] = { instanceRDPParams[instanceIndex].convertK[0], instanceRDPParams[instanceIndex].convertK[1],
++            instanceRDPParams[instanceIndex].convertK[2], instanceRDPParams[instanceIndex].convertK[3] };
++        if ((cycleType == G_CYC_1CYCLE) || (cycleType == G_CYC_2CYCLE)) {
++            if (renderFlagUsesTexture0(rp.flags) && !biLerp0 && (texFmt0 != G_IM_FMT_YUV)) {
++                texVal0 = convertTexel(texVal0, convertK);
++            }
++
++            if (renderFlagUsesTexture1(rp.flags)) {
++                if (cycleType == G_CYC_1CYCLE) {
++                    // The second texel is the next pixel's first one: same cycle, same mode.
++                    if (!biLerp0 && (texFmt1 != G_IM_FMT_YUV)) {
++                        texVal1 = convertTexel(texVal1, convertK);
++                    }
++                }
++                else if (convertOne) {
++                    texVal1 = biLerp1 ? texVal0.bbbb : convertTexel(texVal0, convertK);
++                }
++                else if (!biLerp1 && (texFmt1 != G_IM_FMT_YUV)) {
++                    texVal1 = convertTexel(texVal1, convertK);
++                }
++            }
++        }
++    }
++
+     // Color combiner.
+     float4 shadeColor = vertexColor;
+     float4 combinerColor;
