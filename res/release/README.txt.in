@@ -17,7 +17,10 @@ FIRST RUN
 
 SETTINGS MENU
   Esc, or a controller's Back (View) button, opens the settings menu over the paused game. Settings
-  in the launcher opens the same menu. Tabs: General, Controls, Graphics, Sound.
+  in the launcher opens the same menu. Tabs: General, Controls, Graphics, Sound, Cheats.
+  Cheats (all off by default): infinite health for player 1, Gargos playable, all Options tiers
+  unlocked. The Options unlock isn't written to your save, so turning it off brings back the tiers
+  you had earned.
   Up/down picks a setting, left/right changes it, Enter (A) selects, Esc (B) goes back,
   Q/E (LB/RB) switches tabs. The mouse works too. Changes apply at once and are saved.
   Controls > Bindings: choose a slot, press Enter (A), then press the key or controller input to use;
@@ -42,6 +45,7 @@ SETTINGS AND SAVES  (%APPDATA%\KIGRecomp)
                  dpdown dpleft dpright leftstick rightstick, lefttrigger righttrigger, leftx- leftx+
                  lefty- lefty+ rightx- rightx+ righty- righty+)
   sound.json     master_volume (0-100), mute_when_unfocused (true/false)
+  cheats.json    infinite_health_p1, unlock_gargos, unlock_options (true/false)
   window.json    window size and position (remembered automatically)
   saves\kig.us.bin               the game's EEPROM save
   saves\controllerpak_port<N>\   Controller Pak saves
