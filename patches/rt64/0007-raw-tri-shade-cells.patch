@@ -1,5 +1,5 @@
 diff --git a/src/gbi/rt64_gbi_rdp.cpp b/src/gbi/rt64_gbi_rdp.cpp
-index 136c120..34eb41e 100644
+index 136c120..dab05a7 100644
 --- a/src/gbi/rt64_gbi_rdp.cpp
 +++ b/src/gbi/rt64_gbi_rdp.cpp
 @@ -4,6 +4,8 @@
@@ -27,7 +27,7 @@ index 136c120..34eb41e 100644
                      hlslpp::int4 baseColorFixed{
                          ((curData[0].w0 >> 16) << 16) | (curData[2].w0 >> 16),
                          ((curData[0].w0 & 0xFFFF) << 16) | (curData[2].w0 & 0xFFFF),
-@@ -722,6 +726,84 @@ namespace RT64 {
+@@ -722,6 +726,90 @@ namespace RT64 {
                  clipAndAdd(lower, 4);
              }
  
@@ -51,8 +51,10 @@ index 136c120..34eb41e 100644
 +                    minY = std::min(minY, v.y); maxY = std::max(maxY, v.y);
 +                }
 +
++                // A corner can have W exactly 0 (the sky's horizon, when the camera height puts it on a whole line:
++                // W 7070 falling 70 a line over 101 lines); that triangle is cut like any other, not drawn uncut.
 +                constexpr float MaxRatio = 1.05f;
-+                if (colorVaries && (minW > 0.0f) && (maxW > minW * MaxRatio)) {
++                if (colorVaries && (maxW > minW * MaxRatio)) {
 +                    auto wAt = [&](float x, float y) {
 +                        return std::fabs(planeBase[6] + planeDe[6] * (y - edgeYFloor) + planeDx[6] * (x - xOnH(y)));
 +                    };
@@ -78,8 +80,13 @@ index 136c120..34eb41e 100644
 +
 +                        const float y1 = std::min(y0 + h, maxY);
 +                        for (float x0 = minX; (x0 < maxX) && (cells < MaxCells);) {
++                            // Narrower cells only help with the change of W across x: a row a line tall can still
++                            // vary more than the ratio down its height (near W = 0), and splitting it into
++                            // pixel-wide columns would not change that, only use up the cells.
++                            const float rowRatio = ratioOver(x0, y0, x0, y1);
++                            const float limit = (rowRatio > MaxRatio) ? rowRatio * MaxRatio : MaxRatio;
 +                            float w = maxX - x0;
-+                            while ((w > 1.0f) && (ratioOver(x0, y0, x0 + w, y1) > MaxRatio)) {
++                            while ((w > 1.0f) && (ratioOver(x0, y0, x0 + w, y1) > limit)) {
 +                                w *= 0.5f;
 +                            }
 +
@@ -105,8 +112,7 @@ index 136c120..34eb41e 100644
 +                    // Too many cells: draw it uncut rather than lose the rest of it.
 +                    if (y0 < maxY) {
 +                        clippedTris.swap(source);
-+                    }
-+                }
++                    }                }
 +            }
 +
              if (!clippedTris.empty()) {
