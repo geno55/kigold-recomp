@@ -1,5 +1,5 @@
 #pragma once
-// Persistent settings: general.json, graphics.json, sound.json and window.json in the app folder,
+// Persistent settings: general.json, graphics.json, sound.json, cheats.json and window.json in the app folder,
 // stored through librecomp's recomp::config::Config. (controls.json: src/game/input.cpp.)
 #include <string>
 
@@ -28,9 +28,11 @@ namespace kig::config {
     // Controller Pak inserted in this port (0-3), per general.json. KIG_PAKS overrides it in input.cpp.
     bool pak_inserted(int port);
     bool pause_when_unfocused();
+    // A cheats.json option (an id from define_cheats in config.cpp).
+    bool cheat(const char* id);
 
     // The files the settings menu edits (window.json is state, not settings).
-    enum class Section { General, Graphics, Sound };
+    enum class Section { General, Graphics, Sound, Cheats };
     // A section's options (schema); read their values with get_value.
     const recomp::config::Config& section_config(Section section);
     recomp::config::ConfigValueVariant get_value(Section section, const std::string& id);

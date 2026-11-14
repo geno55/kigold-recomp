@@ -3,9 +3,9 @@
 //
 // Launcher: ROM status, Start game, Choose ROM..., Settings, Quit. Shown on every normal start; test runs
 // (--frames) skip it.
-// Settings: General / Controls / Graphics / Sound tabs over the paused game, opened with Esc or a
+// Settings: General / Controls / Graphics / Sound / Cheats tabs over the paused game, opened with Esc or a
 // controller's Back (View) button. Every option is a row; changes apply at once and are saved to their
-// file (kig::config::set_value, kig::input::set_controls_settings). General, Graphics and Sound rows
+// file (kig::config::set_value, kig::input::set_controls_settings). General, Graphics, Sound and Cheats rows
 // come from the librecomp config schemas (src/main/config.cpp), so a new option there shows up here.
 //
 // Navigation is the menu's own, not ImGui's, so it behaves the same with a keyboard, a controller or a
@@ -45,8 +45,8 @@ namespace {
     // State
     // -----------------------------------------------------------------------------------------------
     enum class Screen { None, Launcher, Settings };
-    enum Tab { TabGeneral, TabControls, TabGraphics, TabSound, NumTabs };
-    const char* const TabNames[NumTabs] = { "General", "Controls", "Graphics", "Sound" };
+    enum Tab { TabGeneral, TabControls, TabGraphics, TabSound, TabCheats, NumTabs };
+    const char* const TabNames[NumTabs] = { "General", "Controls", "Graphics", "Sound", "Cheats" };
 
     enum class Device { Keyboard, Xbox, PlayStation, Nintendo };
     enum class Glyph { Confirm, Back, Clear, TabPrev, TabNext, Menu };
@@ -69,7 +69,7 @@ namespace {
     std::string launcher_message;
     int launcher_selected = -1;
     int tab = TabGeneral;
-    std::array<int, NumTabs> selected{ -1, -1, -1, -1 };
+    std::array<int, NumTabs> selected{ -1, -1, -1, -1, -1 };
     bool scroll_to_selected = false;
     bool quit_armed = false;  // "Quit game" asks for a second press
 
@@ -475,6 +475,7 @@ namespace {
             case TabControls: add_controls_rows(rows); break;
             case TabGraphics: add_schema_rows(rows, Section::Graphics); break;
             case TabSound: add_schema_rows(rows, Section::Sound); break;
+            case TabCheats: add_schema_rows(rows, Section::Cheats); break;
         }
         return rows;
     }

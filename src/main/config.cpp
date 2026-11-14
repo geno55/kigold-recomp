@@ -3,6 +3,7 @@
 //   general.json   Controller Pak per port, pause when unfocused
 //   graphics.json  RT64 options (the ultramodern GraphicsConfig fields set_application_user_config maps)
 //   sound.json     master volume, mute when the window loses focus
+//   cheats.json    cheats (src/game/cheats.cpp applies them), all off by default
 //   window.json    last windowed size/position and maximised state (state, not settings: rewritten on exit)
 // controls.json is read and written by src/game/input.cpp (its bindings are lists, not librecomp options).
 //
@@ -37,6 +38,7 @@ namespace {
     Config general{ "General", "general" };
     Config graphics{ "Graphics", "graphics" };
     Config sound{ "Sound", "sound" };
+    Config cheats{ "Cheats", "cheats" };
     Config window{ "Window", "window" };
 
     // Guards the option values of general/graphics/sound: the menu writes them on the main thread while
@@ -70,6 +72,7 @@ namespace {
         switch (section) {
             case kig::config::Section::Graphics: return graphics;
             case kig::config::Section::Sound: return sound;
+            case kig::config::Section::Cheats: return cheats;
             case kig::config::Section::General:
             default: return general;
         }
@@ -124,6 +127,17 @@ namespace {
         sound.add_number_option("master_volume", "Master volume", "0-100 (percent).", 0, 100, 1, 0, false, 100);
         sound.add_bool_option("mute_when_unfocused", "Mute when unfocused",
                               "Silences the game while its window isn't the active one.", false);
+    }
+
+    void define_cheats() {
+        cheats.add_bool_option("infinite_health_p1", "Infinite health (player 1)",
+                               "Player 1's health stays full.", false);
+        cheats.add_bool_option("unlock_gargos", "Unlock Gargos",
+                               "Gargos can be picked at the character select, as with the Z A R Z A B code. "
+                               "Turning it off hides him again.", false);
+        cheats.add_bool_option("unlock_options", "Unlock all options",
+                               "All five tiers of the Options menu, as with the Z B A L A Z code. Not written to "
+                               "the game's save: turning it off goes back to the tiers you have earned.", false);
     }
 
     void define_window() {
@@ -204,10 +218,12 @@ void kig::config::load() {
     define_general();
     define_graphics();
     define_sound();
+    define_cheats();
     define_window();
     load_one(general);
     nlohmann::json graphics_json = load_one(graphics);
     nlohmann::json sound_json = load_one(sound);
+    nlohmann::json cheats_json = load_one(cheats);
     load_one(window);
     apply_graphics();
     std::fprintf(stderr, "[kig] config: graphics %s\n", graphics_json.dump().c_str());
@@ -228,6 +244,10 @@ kig::config::SoundSettings kig::config::sound_settings() {
 
 bool kig::config::pak_inserted(int port) {
     return port >= 0 && port < kig::input::NumPorts && get_bool(general, pak_option(port));
+}
+
+bool kig::config::cheat(const char* id) {
+    return get_bool(cheats, id);
 }
 
 bool kig::config::pause_when_unfocused() {

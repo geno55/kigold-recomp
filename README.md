@@ -30,6 +30,11 @@ Run `kig.exe`. The first time, it asks you to pick your game file. You can also 
 
 Your settings and save data are kept in `%APPDATA%\KIGRecomp`.
 
+The settings menu (Esc, or a controller's Back/View button) has a **Cheats** tab: infinite health for
+player 1, Gargos playable and all Options tiers unlocked. They are all off by
+default. The Options unlock isn't written to your save, so turning it off brings back the tiers you
+had earned.
+
 Press **F5** to save a state at the current moment and **F7** to load it again (one quick-save slot, kept
 in `%APPDATA%\KIGRecomp\states`). This is meant for testing and reproducing bugs: a state belongs to the
 build that made it and may not load in other versions.

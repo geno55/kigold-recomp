@@ -14,6 +14,7 @@
 #include "ultramodern/config.hpp"
 #include "ultramodern/ultramodern.hpp"
 
+#include "kig_cheats.h"
 #include "kig_crash.h"
 #include "kig_capture.h"
 #include "kig_frame_log.h"
@@ -372,5 +373,6 @@ std::unique_ptr<ultramodern::renderer::RendererContext> kig::renderer::create_re
     uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
     kig::crash::set_rdram(rdram);
     kig::steps::set_rdram(rdram);
+    kig::cheats::set_rdram(rdram);
     return std::make_unique<kig::renderer::RT64Context>(rdram, window_handle, developer_mode);
 }

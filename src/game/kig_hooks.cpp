@@ -20,6 +20,7 @@
 #include "ultramodern/config.hpp"
 #include "librecomp/game.hpp"
 #include "librecomp/overlays.hpp"
+#include "kig_cheats.h"
 #include "kig_crash.h"
 #include "kig_input.h"
 #include "kig_log.h"
@@ -244,6 +245,7 @@ extern "C" int kig_fight_frame(uint8_t* rdram, recomp_context* ctx) {
         fight_frame_entering = false;
         return 0;  // the call below: run the frame's code
     }
+    kig_cheats_fight_frame(rdram);
     FightFrame frame;
     frame.restart_depth = restart_targets.size();
     // A native frame between recompiled ones (see kig_dispatch_entity): marked, and the depth reset after

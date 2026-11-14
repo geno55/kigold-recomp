@@ -100,6 +100,10 @@ for _f in ("func_8001ECB4", "func_8001ED30"):
 # (kig_hooks.cpp).
 HOOKS += [("seg1_801BDB40", 0x801BE0EC, "kig_pose_column(rdram, ctx); /* kig: Expand poses */"),
           ("seg1_801BD180", 0x801BDA9C, "kig_pose_rect(rdram, ctx); /* kig: Expand poses */")]
+# Cheats (src/game/cheats.cpp): the options tier the save gets is the game's own, not the cheat's.
+HOOKS += [("seg1_801CD7F0", 0x801CD82C, "kig_cheats_options_loaded(rdram, ctx); /* kig: cheats */"),
+          ("seg1_801ACB20", 0x801AD064, "kig_cheats_options_reached(rdram, ctx); /* kig: cheats */"),
+          ("seg1_801CDB4C", 0x801CDC18, "kig_cheats_options_save(rdram, ctx); /* kig: cheats */")]
 
 # Display list pointer check (#7, src/game/kig_hooks.cpp; does nothing unless KIG_PTR_CHECK is set). The
 # fight loop func_8000FAA0 keeps the display list head at 0x8004A318 ($s6 from 0x8001001C) and stores it

@@ -52,6 +52,7 @@
 #include "librecomp/game.hpp"
 #include "ultramodern/ultramodern.hpp"
 
+#include "kig_cheats.h"
 #include "kig_config.h"
 #include "kig_input.h"
 #include "kig_steps.h"
@@ -540,6 +541,9 @@ bool kig::input::get_input(int port, uint16_t* buttons, float* x, float* y) {
     // thread's update() runs less often than VIs arrive (--speed).
     apply_script(port, s);
     kig::steps::apply(port, s.buttons, s.x, s.y);
+    if (port == 0) {
+        kig::cheats::on_input();
+    }
     if (log_input) {
         const PortState& a = last_logged[port];
         if (a.connected != s.connected || a.buttons != s.buttons || a.x != s.x || a.y != s.y) {

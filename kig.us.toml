@@ -187,6 +187,21 @@ before_vram = 0x801BDA9C
 text = "kig_pose_rect(rdram, ctx); /* kig: Expand poses */"
 
 [[patches.hook]]
+func = "seg1_801CD7F0"
+before_vram = 0x801CD82C
+text = "kig_cheats_options_loaded(rdram, ctx); /* kig: cheats */"
+
+[[patches.hook]]
+func = "seg1_801ACB20"
+before_vram = 0x801AD064
+text = "kig_cheats_options_reached(rdram, ctx); /* kig: cheats */"
+
+[[patches.hook]]
+func = "seg1_801CDB4C"
+before_vram = 0x801CDC18
+text = "kig_cheats_options_save(rdram, ctx); /* kig: cheats */"
+
+[[patches.hook]]
 func = "func_8000FAA0"
 before_vram = 0x80010048
 text = "kig_gfx_track(rdram, ctx, 0x80010048u, ctx->r25); /* kig: #7 check */"

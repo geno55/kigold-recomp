@@ -68,6 +68,15 @@ void kig_pose_rect(uint8_t* rdram, recomp_context* ctx);
 int kig_fight_frame(uint8_t* rdram, recomp_context* ctx);
 void kig_fight_frame_exit(uint8_t* rdram, recomp_context* ctx);
 
+// src/game/cheats.cpp. _fight_frame: at the start of each fight frame (from kig_fight_frame), infinite
+// health. The options tier: _loaded after seg1_801CD7F0 copies it from the loaded save
+// (0x801CD82C), _reached before seg1_801ACB20 raises it to $v0 + 1 (0x801AD064), _save after
+// seg1_801CDB4C reads it into $t1 for the save buffer (0x801CDC18).
+void kig_cheats_fight_frame(uint8_t* rdram);
+void kig_cheats_options_loaded(uint8_t* rdram, recomp_context* ctx);
+void kig_cheats_options_reached(uint8_t* rdram, recomp_context* ctx);
+void kig_cheats_options_save(uint8_t* rdram, recomp_context* ctx);
+
 // src/game/kig_hooks.cpp: `mfc0 rt, Count` in game code (N64Recomp patch in patches/n64recomp/).
 uint32_t recomp_cop0_count(void);
 

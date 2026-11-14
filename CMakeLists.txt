@@ -233,6 +233,7 @@ add_executable(kig
     ${CMAKE_SOURCE_DIR}/src/main/ui_render.cpp
     ${CMAKE_BINARY_DIR}/kig.rc
     ${CMAKE_SOURCE_DIR}/src/game/pi.cpp
+    ${CMAKE_SOURCE_DIR}/src/game/cheats.cpp
     ${CMAKE_SOURCE_DIR}/src/game/input.cpp
     ${CMAKE_SOURCE_DIR}/src/game/kig_hooks.cpp
     ${CMAKE_SOURCE_DIR}/src/game/savestate.cpp
