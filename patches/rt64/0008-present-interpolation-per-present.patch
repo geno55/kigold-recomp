@@ -1,0 +1,31 @@
+diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
+--- a/src/hle/rt64_present_queue.cpp
++++ b/src/hle/rt64_present_queue.cpp
+@@ -159,6 +159,13 @@ namespace RT64 {
+             }
+             
+             if ((presentFb != nullptr) && (viFb != nullptr)) {
++                // kig (patch 0008): whether this present shows a framebuffer the latest workload drew. The
++                // framebuffer's interpolationEnabled flag can't say: it's only reset for the framebuffers the
++                // latest workload drew, so a buffer shown again later kept it from its last present and got
++                // the latest workload's interpolated frames, made for another framebuffer. With the Display or
++                // Manual refresh rate, KI Gold then showed frames from its other buffer, sometimes one only
++                // partly drawn (the title's fire without the logo).
++                bool presentDrawnByWorkload = false;
+                 for (uint32_t colorAddress : ext.sharedResources->colorImageAddressVector) {
+                     Framebuffer *colorFb = fbManager.find(colorAddress);
+                     if (colorFb == nullptr) {
+@@ -186,11 +193,12 @@ namespace RT64 {
+                     // so interpolation is possible.
+                     if (colorFb == presentFb) {
+                         presentFb->interpolationEnabled = true;
++                        presentDrawnByWorkload = true;
+                         break;
+                     }
+                 }
+ 
+-                if (presentFb->interpolationEnabled) {
++                if (presentDrawnByWorkload) {
+                     framesToPresent = frameCounters.count;
+                 }
+                 else {
