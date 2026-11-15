@@ -1,8 +1,8 @@
 diff --git a/src/shaders/RasterPS.hlsl b/src/shaders/RasterPS.hlsl
-index e7895c3..61a5687 100644
+index e7895c3..81ad06f 100644
 --- a/src/shaders/RasterPS.hlsl
 +++ b/src/shaders/RasterPS.hlsl
-@@ -45,6 +45,30 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
+@@ -45,6 +45,36 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
  }
  #endif
  
@@ -14,26 +14,32 @@ index e7895c3..61a5687 100644
 +    return ((v & 0x180) == 0x180) ? (v - 0x200) : v;
 +}
 +
-+float4 convertTexel(float4 texel, int convertK[4]) {
++int convertConstant(int k) {
++    const int k9 = k & 0x1FF;
++    return (((k9 & 0x100) != 0) ? (k9 - 0x200) : k9) * 2 + 1;
++}
++
++// No loops or local arrays here: the Vulkan path specializes this shader with re-spirv, which can't sort a
++// shader whose instruction graph has a cycle, and a loop is one. Every raster pipeline then failed to build.
++float4 convertTexel(float4 texel, int4 convertK) {
 +    const int y = int(round(texel.b * 255.0f));
 +    const int u = int(round(texel.r * 255.0f));
 +    const int v = int(round(texel.g * 255.0f));
-+    int k[4];
-+    for (int i = 0; i < 4; i++) {
-+        const int k9 = convertK[i] & 0x1FF;
-+        k[i] = (((k9 & 0x100) != 0) ? (k9 - 0x200) : k9) * 2 + 1;
-+    }
++    const int k0 = convertConstant(convertK.x);
++    const int k1 = convertConstant(convertK.y);
++    const int k2 = convertConstant(convertK.z);
++    const int k3 = convertConstant(convertK.w);
 +
-+    const int r = y + ((k[0] * v + 0x80) >> 8);
-+    const int g = y + ((k[1] * u + k[2] * v + 0x80) >> 8);
-+    const int b = y + ((k[3] * u + 0x80) >> 8);
++    const int r = y + ((k0 * v + 0x80) >> 8);
++    const int g = y + ((k1 * u + k2 * v + 0x80) >> 8);
++    const int b = y + ((k3 * u + 0x80) >> 8);
 +    return float4(convertExtend9(r), convertExtend9(g), convertExtend9(b), convertExtend9(y)) / 255.0f;
 +}
 +
  LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float2 vertexUV, float4 vertexSmoothColor, float4 vertexFlatColor,
      bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
  {
-@@ -132,6 +156,8 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+@@ -132,6 +162,8 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
  
      float4 texVal0 = float4(0.0f, 0.0f, 0.0f, 1.0f);
      float4 texVal1 = float4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -42,7 +48,7 @@ index e7895c3..61a5687 100644
      if (renderFlagUsesTexture0(rp.flags)) {
          const uint globalTileIndex = instanceRenderIndices[gConstants.renderIndex].rdpTileIndex + tileIndex0;
          RDPTile rdpTile = RDPTiles[globalTileIndex];
-@@ -144,6 +170,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+@@ -144,6 +176,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
          const GPUTile gpuTile = GPUTiles[globalTileIndex];
          const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
          texVal0 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, false);
@@ -50,7 +56,7 @@ index e7895c3..61a5687 100644
      }
      
      if (renderFlagUsesTexture1(rp.flags)) {
-@@ -160,8 +187,44 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+@@ -160,8 +193,44 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
          const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
          const uint nativeSampler = renderFlagNativeSampler1(rp.flags);
          texVal1 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, oneCycleHardwareBug);
@@ -69,8 +75,8 @@ index e7895c3..61a5687 100644
 +        const bool biLerp0 = ((otherMode.H >> 11) & 1) != 0;
 +        const bool biLerp1 = ((otherMode.H >> 10) & 1) != 0;
 +        const bool convertOne = ((otherMode.H >> 9) & 1) != 0;
-+        const int convertK[4] = { instanceRDPParams[instanceIndex].convertK[0], instanceRDPParams[instanceIndex].convertK[1],
-+            instanceRDPParams[instanceIndex].convertK[2], instanceRDPParams[instanceIndex].convertK[3] };
++        const int4 convertK = int4(instanceRDPParams[instanceIndex].convertK[0], instanceRDPParams[instanceIndex].convertK[1],
++            instanceRDPParams[instanceIndex].convertK[2], instanceRDPParams[instanceIndex].convertK[3]);
 +        if ((cycleType == G_CYC_1CYCLE) || (cycleType == G_CYC_2CYCLE)) {
 +            if (renderFlagUsesTexture0(rp.flags) && !biLerp0 && (texFmt0 != G_IM_FMT_YUV)) {
 +                texVal0 = convertTexel(texVal0, convertK);
