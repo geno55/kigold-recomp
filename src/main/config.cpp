@@ -105,10 +105,6 @@ namespace {
             { { AspectRatio::Original, "Original" }, { AspectRatio::Stretch, "Stretch", "Stretch to fill" },
               { AspectRatio::Expand, "Expand" } },
             AspectRatio::Original);
-        graphics.add_enum_option("antialiasing", "Antialiasing", "",
-            { { Antialiasing::None, "None" }, { Antialiasing::MSAA2X, "MSAA2X", "MSAA 2x" }, { Antialiasing::MSAA4X, "MSAA4X", "MSAA 4x" },
-              { Antialiasing::MSAA8X, "MSAA8X", "MSAA 8x" } },
-            Antialiasing::None);
         graphics.add_enum_option("refresh_rate", "Refresh rate",
             "Original: the game's rate. Display: the monitor's. Manual: refresh_rate_manual.",
             { { RefreshRate::Original, "Original" }, { RefreshRate::Display, "Display" }, { RefreshRate::Manual, "Manual" } },
@@ -159,7 +155,10 @@ namespace {
         // RT64's HUD aspect ratio only moves elements placed with its extended GBI, which KI Gold doesn't use,
         // so it isn't offered.
         g.hr_option = HUDRatioMode::Original;
-        g.msaa_option = get_enum<Antialiasing>(graphics, "antialiasing");
+        // MSAA isn't offered either: the fighters, effects and HUD are sprites and the stages are mostly straight
+        // horizontal and vertical edges, so it changed a few edge pixels and added a seam along some railings.
+        // An antialiasing value in an older graphics.json is ignored.
+        g.msaa_option = Antialiasing::None;
         g.rr_option = get_enum<RefreshRate>(graphics, "refresh_rate");
         g.rr_manual_value = (int)get_number(graphics, "refresh_rate_manual", 20, 360);
         g.hpfb_option = get_enum<HighPrecisionFramebuffer>(graphics, "high_precision_framebuffer");

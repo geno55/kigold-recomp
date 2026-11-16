@@ -34,8 +34,8 @@ CONTROLS
   Alt+Enter or F11: toggle fullscreen (remembered).
 
 SETTINGS AND SAVES  (%APPDATA%\KIGRecomp)
-  graphics.json  resolution (Original/Original2x/Auto), antialiasing (None/MSAA2X/MSAA4X/MSAA8X),
-                 window_mode (Windowed/Fullscreen), graphics_api (Auto/D3D12/Vulkan), and more
+  graphics.json  resolution (Original/Original2x/Auto), window_mode (Windowed/Fullscreen),
+                 graphics_api (Auto/D3D12/Vulkan), and more
   general.json   pak_port_1..4: which ports have a Controller Pak (all four by default),
                  pause_when_unfocused (true/false)
   controls.json  keyboard_port (1-4, 0 = off), deadzone (percent), pads (per port, part of a controller's
