@@ -1,0 +1,141 @@
+diff --git a/src/hle/rt64_interpreter.cpp b/src/hle/rt64_interpreter.cpp
+index 59576b3..8d344ba 100644
+--- a/src/hle/rt64_interpreter.cpp
++++ b/src/hle/rt64_interpreter.cpp
+@@ -53,6 +53,7 @@ namespace RT64 {
+         state->dlCpuProfiler.start();
+         state->rdp->inRawRdpList = true;  // kig patch: see RDP::drawTexRect
+         state->rdp->expandRepeatRects = 0;  // kig patch: see GBI_F3D::runDl
++        state->rdp->expandSidesCleared = false;  // kig patch: see RDP::fillRect
+ 
+         // Update the state with the current display list address.
+         state->displayListAddress = dlStartAdddress;
+diff --git a/src/hle/rt64_rdp.cpp b/src/hle/rt64_rdp.cpp
+index 7b9c578..4a22ddd 100644
+--- a/src/hle/rt64_rdp.cpp
++++ b/src/hle/rt64_rdp.cpp
+@@ -1046,9 +1046,39 @@ namespace RT64 {
+             lry |= 3;
+         }
+ 
++        expandClearSides(extAlignment);
+         drawRect(ulx, uly, lrx, lry, 0, 0, 0, 0, false, extAlignment);
+     }
+ 
++    // kig patch: with the Expand aspect ratio, before the first draw of a raw RDP list for a fight frame, the side strips
++    // beside the 4:3 area are filled top to bottom with the fill colour (the list sets it, black, before drawing
++    // anything). A fight redraws its whole picture every frame but only clears what the 4:3 picture covers, so whatever
++    // it left undrawn at the sides showed earlier frames: pictures that lingered, smeared as the camera moved and jumped
++    // when something new was drawn there. Now it is black. KI Gold's fights draw into a 320-wide image; its menus
++    // (640 wide) redraw only parts of the picture each frame and keep the rest, sides included, so they are left alone.
++    void RDP::expandClearSides(const ExtendedAlignment &extAlignment) {
++        const FixedRect &expandScissor = scissorRectStack[scissorStackSize - 1];
++        constexpr uint32_t FightImageWidth = 320;
++        if (!inRawRdpList || expandSidesCleared || (state->ext.userConfig->aspectRatio != UserConfiguration::AspectRatio::Expand) ||
++            (colorImage.width != FightImageWidth) ||
++            expandScissor.isNull() || (expandScissor.ulx > 0) || (expandScissor.lrx < int32_t(colorImage.width << 2) - 4) ||
++            (extAlignment.leftOrigin != G_EX_ORIGIN_NONE) || (extAlignment.rightOrigin != G_EX_ORIGIN_NONE))
++        {
++            return;
++        }
++
++        expandSidesCleared = true;
++        const uint32_t savedH = otherMode.H;
++        const uint32_t savedL = otherMode.L;
++        setOtherMode((savedH & ~(3U << G_MDSFT_CYCLETYPE)) | G_CYC_FILL, savedL);
++        const int32_t screenWidth = int32_t(colorImage.width) << 2;
++        drawRect(expandScissor.ulx - screenWidth, expandScissor.uly, expandScissor.ulx | 3, expandScissor.lry | 3, 0, 0, 0, 0, false, extAlignment);
++        state->drawCall.expandSide = -1;
++        drawRect(expandScissor.lrx, expandScissor.uly, (expandScissor.lrx + screenWidth) | 3, expandScissor.lry | 3, 0, 0, 0, 0, false, extAlignment);
++        state->drawCall.expandSide = 1;
++        setOtherMode(savedH, savedL);
++    }
++
+     void RDP::setRectAlign(const ExtendedAlignment &extAlignment) {
+         extended.global.rect = extAlignment;
+     }
+@@ -1086,6 +1116,8 @@ namespace RT64 {
+     }
+     
+     void RDP::drawTris(uint32_t triCount, const float *pos, const float *tc, const float *col, uint8_t tile, uint8_t levels) {
++        expandClearSides(extended.global.rect);  // kig patch: a raw list's first draw can be its sky's triangles
++
+         // Levels is expected to be above 0 elsewhere.
+         levels += 1;
+ 
+@@ -1322,6 +1354,8 @@ namespace RT64 {
+         RT64_LOG_PRINTF("RDP::drawTexRect(ulx %d, uly %d, lrx %d, lry %d, tile %u, uls %d, ult %d, dsdx %d, dtdy %d, flip %u)", ulx, uly, lrx, lry, tile, uls, ult, dsdx, dtdy, flip);
+ #   endif
+ 
++        expandClearSides(extAlignment);  // kig patch
++
+         // Check if the texture needs to be updated.
+         DrawCall &drawCall = state->drawCall;
+         if (!drawCall.textureOn || (drawCall.textureTile != tile) || (drawCall.textureLevels != 1)) {
+@@ -1349,10 +1383,14 @@ namespace RT64 {
+         const FixedRect &expandScissor = scissorRectStack[scissorStackSize - 1];
+         const LoadTile &expandTile = tiles[tile];
+         const bool expandRepeats = ((expandTile.cms & G_TX_CLAMP) == 0) && (expandTile.masks > 0);
++        // A clamped rectangle (KI Gold's fight backdrop seen through a stage's window, a pre-rendered picture wider
++        // than the 4:3 view) is extended only as far as its texture has texels, so the picture continues and the
++        // rest stays black instead of smearing the edge column.
++        const bool expandClamps = ((expandTile.cms & G_TX_CLAMP) != 0) && (dsdx > 0);
+         const bool expandCandidate = inRawRdpList && (state->ext.userConfig->aspectRatio == UserConfiguration::AspectRatio::Expand) && !flip &&
+             !expandScissor.isNull() && (expandScissor.ulx <= 0) && (expandScissor.lrx >= int32_t(colorImage.width << 2) - 4) &&
+             (extAlignment.leftOrigin == G_EX_ORIGIN_NONE) && (extAlignment.rightOrigin == G_EX_ORIGIN_NONE) &&
+-            (expandRepeats || (dsdx == 0));
++            (expandRepeats || expandClamps || (dsdx == 0));
+         // A sliver at the edge (KI Gold's fire also redraws a 1-pixel column at the right) is skipped: its
+         // texture doesn't line up with the strip next to it, which is extended over it, and on a wider screen
+         // that column is no longer at the edge, so it showed as a line.
+@@ -1365,17 +1403,25 @@ namespace RT64 {
+             const bool reachesLeft = (ulx <= expandScissor.ulx);
+             const bool reachesRight = (lrx >= expandScissor.lrx - 4);
+             const int32_t extension = expandScissor.lrx - expandScissor.ulx;
++            // How far a clamped rectangle can go (10.2 pixels) before s leaves the tile's texels: s is uls (10.5) plus
++            // dsdx (5.10) per pixel, and the tile spans uls..lrs (10.2) inclusive.
++            const int32_t texelsLeft = expandClamps ? ((int32_t(uls) - int32_t(expandTile.uls) * 8) * 128) / dsdx : extension;
++            const int32_t texelsRight = expandClamps ? ((int32_t(expandTile.lrs) * 8 + 32 - int32_t(uls)) * 128) / dsdx - (lrx - ulx) : extension;
+             if (reachesLeft && !reachesRight) {
+-                const int32_t newUls = uls - (int32_t(dsdx) * extension) / 128;
+-                if (newUls >= INT16_MIN) {
+-                    ulx -= extension;
++                const int32_t reach = std::min(extension, texelsLeft);
++                const int32_t newUls = uls - (int32_t(dsdx) * reach) / 128;
++                if ((reach > 0) && (newUls >= INT16_MIN)) {
++                    ulx -= reach;
+                     uls = int16_t(newUls);
+                     extended = true;
+                 }
+             }
+             else if (reachesRight && !reachesLeft) {
+-                lrx += extension;
+-                extended = true;
++                const int32_t reach = std::min(extension, texelsRight);
++                if (reach > 0) {
++                    lrx += reach;
++                    extended = true;
++                }
+             }
+         }
+ 
+diff --git a/src/hle/rt64_rdp.h b/src/hle/rt64_rdp.h
+index 8df33d4..98f1d73 100644
+--- a/src/hle/rt64_rdp.h
++++ b/src/hle/rt64_rdp.h
+@@ -74,6 +74,7 @@ namespace RT64 {
+         LoadTile tiles[RDP_TILES] = {};
+         uint64_t tileReplacementHashes[RDP_TILES] = {};
+         bool inRawRdpList = false;  // kig patch: commands come from a raw RDP list, not a gfx task
++        bool expandSidesCleared = false;  // kig patch: the raw RDP list's first fill also cleared the side strips (RDP::fillRect)
+         uint32_t expandRepeatRects = 0;  // kig patch: texture rectangles still to repeat in the side strips (GBI_F3D::runDl)
+         uint8_t expandRectTag = 0;  // kig patch: the reserved top bits of the current G_TEXRECT's second word (RDP::drawTexRect)
+ 
+@@ -186,6 +187,7 @@ namespace RT64 {
+         void pushFillColor();
+         void popFillColor();
+         void setOtherMode(uint32_t high, uint32_t low);
++        void expandClearSides(const ExtendedAlignment &extAlignment);  // kig patch
+         void setPrimDepth(uint16_t z, uint16_t dz);
+         void setScissor(uint8_t mode, int32_t ulx, int32_t uly, int32_t lrx, int32_t lry);
+         void setScissor(uint8_t mode, int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, const ExtendedAlignment &extAlignment);
